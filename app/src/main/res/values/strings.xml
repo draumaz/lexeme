@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Lexeme</string>
+    <string name="process_text_label">Look up in Lexeme</string>
+</resources>
