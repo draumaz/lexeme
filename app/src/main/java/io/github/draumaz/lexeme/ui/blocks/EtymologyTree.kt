@@ -47,6 +47,7 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.draumaz.lexeme.data.Block
 import io.github.draumaz.lexeme.data.EtymologyBranch
 import io.github.draumaz.lexeme.data.EtymologyNode
@@ -152,7 +153,7 @@ private fun BranchView(branch: EtymologyBranch, start: Int, trunk: Boolean) {
 }
 
 /** A leaf-shaped card: two round corners, two tight ones. */
-private val LeafShape = RoundedCornerShape(topStart = 20.dp, topEnd = 6.dp, bottomEnd = 20.dp, bottomStart = 6.dp)
+private val LeafShape = RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomEnd = 14.dp, bottomStart = 4.dp)
 
 @Composable
 private fun NodeCard(node: EtymologyNode, order: Int, word: Boolean) {
@@ -162,7 +163,7 @@ private fun NodeCard(node: EtymologyNode, order: Int, word: Boolean) {
         shape = LeafShape,
         color = if (word) colors.word else colors.node,
         modifier = Modifier
-            .widthIn(max = 200.dp)
+            .widthIn(max = 150.dp)
             .graphicsLayer {
                 val p = pop.value
                 scaleX = 0.5f + 0.5f * p
@@ -171,16 +172,16 @@ private fun NodeCard(node: EtymologyNode, order: Int, word: Boolean) {
                 transformOrigin = TransformOrigin(0f, 0.5f)
             },
     ) {
-        Row(Modifier.padding(start = if (word) 8.dp else 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = if (word) 6.dp else 9.dp, end = 9.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (word) {
-                ShapeBadge(MaterialShapes.Flower, MaterialTheme.colorScheme.primary, size = 26.dp, rotation = { pop.value * 72f }) {}
-                Spacer(Modifier.width(8.dp))
+                ShapeBadge(MaterialShapes.Flower, MaterialTheme.colorScheme.primary, size = 18.dp, rotation = { pop.value * 72f }) {}
+                Spacer(Modifier.width(6.dp))
             }
             Column {
                 if (node.language.isNotEmpty()) {
-                    Text(node.language, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(node.language, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                RichTextView(node.term, style = MaterialTheme.typography.titleMedium.copy(fontFamily = Serif))
+                RichTextView(node.term, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = Serif, lineHeight = 18.sp))
             }
         }
     }
@@ -194,8 +195,8 @@ private fun Twig(relation: String?, order: Int, leafUp: Boolean) {
     val leaf = rememberGrowth(order, bouncy = true)
     Box(
         Modifier
-            .widthIn(min = 40.dp)
-            .height(40.dp)
+            .widthIn(min = 28.dp)
+            .height(32.dp)
             .drawBehind {
                 val y = size.height / 2
                 val path = Path().apply {
@@ -217,8 +218,8 @@ private fun Twig(relation: String?, order: Int, leafUp: Boolean) {
                 color = colors.label,
                 maxLines = 1,
                 modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .offset(y = (-11).dp)
+                    .padding(horizontal = 6.dp)
+                    .offset(y = (-9).dp)
                     .graphicsLayer { alpha = grow.value },
             )
         }
@@ -249,8 +250,8 @@ private fun Merge(order: Int, content: @Composable () -> Unit) {
             }
         },
     ) { measurables, constraints ->
-        val gap = 6.dp.roundToPx()
-        val joint = 32.dp.roundToPx()
+        val gap = 4.dp.roundToPx()
+        val joint = 24.dp.roundToPx()
         val loose = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val placeables = measurables.map { it.measure(loose) }
         val width = placeables.maxOf { it.width }
@@ -287,8 +288,8 @@ private fun DrawScope.drawPartial(path: Path, progress: Float, color: Color, wid
 private fun DrawScope.drawLeaf(base: Offset, up: Boolean, scale: Float, color: Color) {
     if (scale <= 0f) return
     val stem = 3.dp.toPx() * scale
-    val len = 13.dp.toPx() * scale
-    val half = 3.dp.toPx() * scale
+    val len = 10.dp.toPx() * scale
+    val half = 2.5.dp.toPx() * scale
     rotate(if (up) -48f else 48f, pivot = base) {
         val start = Offset(base.x + stem, base.y)
         drawLine(color, base, start, strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
