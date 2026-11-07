@@ -99,6 +99,7 @@ import io.github.draumaz.lexeme.ui.blocks.RichTextView
 import io.github.draumaz.lexeme.ui.blocks.StrokeOrderCard
 import io.github.draumaz.lexeme.ui.components.PoppingTitle
 import io.github.draumaz.lexeme.ui.components.ShapeBadge
+import io.github.draumaz.lexeme.ui.components.rememberSpin
 import io.github.draumaz.lexeme.ui.components.badgeShape
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.hueFor
@@ -395,6 +396,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
     val rotation by animateFloatAsState(if (open) 180f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "pickerChevron")
     val current = languages.getOrNull(selected) ?: return
     val hue = hueFor(current.name)
+    val spin by rememberSpin(16_000)
     val source = remember { MutableInteractionSource() }
     Box(Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 16.dp, vertical = 8.dp)) {
         Surface(
@@ -427,7 +429,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                             val lang = languages[index]
                             val h = hueFor(lang.name)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ShapeBadge(badgeShape(index), h.container, size = 36.dp) {
+                                ShapeBadge(badgeShape(index), h.container, size = 36.dp, rotation = { spin }) {
                                     Text(initials(lang.name), style = MaterialTheme.typography.labelLarge, color = h.content)
                                 }
                                 Spacer(Modifier.width(12.dp))
@@ -454,6 +456,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                 ) {
                     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selected - 2).coerceAtLeast(0))
                     val seen = remember { HashSet<Any>() }
+                    val listSpin by rememberSpin(22_000)
                     // Keep drags here to the list: no toolbar tuck, no chaining into the page.
                     val claim = io.github.draumaz.lexeme.ui.components.LocalScrollClaim.current
                     val contain = remember(claim) {
@@ -494,7 +497,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                                 modifier = Modifier.fillMaxWidth().bouncyEnter(lang.id + index, seen, index - listState.firstVisibleItemIndex).testTag("language_option_$index"),
                             ) {
                                 Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    ShapeBadge(badgeShape(index), h.container, size = 32.dp) {
+                                    ShapeBadge(badgeShape(index), h.container, size = 32.dp, rotation = { listSpin + index * 37f }) {
                                         Text(initials(lang.name), style = MaterialTheme.typography.labelMedium, color = h.content)
                                     }
                                     Spacer(Modifier.width(12.dp))
@@ -536,7 +539,8 @@ private fun LanguageHeader(lang: LanguageEntry, index: Int, modifier: Modifier =
             .testTag("language_header_$index"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ShapeBadge(badgeShape(index), hue.container, size = 54.dp, rotation = { wobble.value }) {
+        val spin by rememberSpin(20_000)
+        ShapeBadge(badgeShape(index), hue.container, size = 54.dp, rotation = { wobble.value + spin }) {
             Text(initials(lang.name), style = MaterialTheme.typography.titleMediumEmphasized, color = hue.content)
         }
         Spacer(Modifier.width(14.dp))

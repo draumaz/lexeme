@@ -39,8 +39,6 @@ import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material3.FloatingToolbarDefaults
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -60,6 +58,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.animation.BoundsTransform
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -88,7 +101,7 @@ import java.net.URLEncoder
 fun wiktionaryUrl(title: String): String =
     "https://en.wiktionary.org/wiki/" + URLEncoder.encode(title.replace(' ', '_'), "UTF-8").replace("%2F", "/")
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun LexemeRoot(
     vm: LexemeViewModel,
@@ -102,16 +115,20 @@ fun LexemeRoot(
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
     val randomBusy by vm.randomBusy.collectAsStateWithLifecycle()
 
-    var focused by remember { mutableStateOf(false) }
+    // Two search fields: the one pinned atop entries, and the one the scallop turns into,
+    // docked above the keyboard. Each tracks its own focus so only one opens its dropdown.
+    var topFocused by remember { mutableStateOf(false) }
+    var dockedFocused by remember { mutableStateOf(false) }
+    val focused = topFocused || dockedFocused
     var settingsOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    // Set by the landing page's search button; the bar composes first, then takes focus.
-    var homeSearch by remember { mutableStateOf(false) }
+    // Set by the search scallop; the docked bar composes (morphing out of it), then takes focus.
+    var dockedSearch by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
-    val homeFocus = remember { FocusRequester() }
-    LaunchedEffect(homeSearch) {
-        if (homeSearch) {
+    val dockedFocus = remember { FocusRequester() }
+    LaunchedEffect(dockedSearch) {
+        if (dockedSearch) {
             androidx.compose.runtime.withFrameNanos { }
-            homeFocus.requestFocus()
+            dockedFocus.requestFocus()
         }
     }
     val focusManager = LocalFocusManager.current
@@ -216,6 +233,7 @@ fun LexemeRoot(
         LocalAudio provides audio,
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
     ) {
+        SharedTransitionLayout {
         Box(
             Modifier
                 .fillMaxSize()
@@ -288,14 +306,24 @@ fun LexemeRoot(
             }
 
             @Composable
-            fun Bar(requester: FocusRequester, fromBottom: Boolean, modifier: Modifier) = SearchBar(
+            fun Bar(
+                requester: FocusRequester,
+                fromBottom: Boolean,
+                modifier: Modifier,
+                fieldModifier: Modifier = Modifier,
+            ) = SearchBar(
                 query = query,
                 onQueryChange = { vm.query.value = it },
                 onSubmit = ::submit,
-                focused = focused,
+                focused = if (fromBottom) dockedFocused else topFocused,
                 onFocusChange = {
-                    if (focused && !it) homeSearch = false
-                    focused = it
+                    if (fromBottom) {
+                        // Losing focus folds the docked bar back into the scallop.
+                        if (dockedFocused && !it) dockedSearch = false
+                        dockedFocused = it
+                    } else {
+                        topFocused = it
+                    }
                 },
                 focusRequester = requester,
                 canGoBack = pages.isNotEmpty(),
@@ -306,6 +334,7 @@ fun LexemeRoot(
                 recent = recent,
                 fromBottom = fromBottom,
                 modifier = modifier,
+                fieldModifier = fieldModifier,
             )
 
             // Entry pages keep the bar pinned up top.
@@ -322,12 +351,12 @@ fun LexemeRoot(
                 Bar(focusRequester, fromBottom = false, Modifier.fillMaxWidth())
             }
 
-            // The landing page has no bar until its search button summons one, docked at the
-            // bottom where the button was and riding on top of the keyboard.
+            // The search scallop's bar: docked above the keyboard, its field morphing out of the
+            // scallop (shared bounds), and back into it when search closes.
             AnimatedVisibility(
-                visible = current == null && (homeSearch || focused),
-                enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
-                exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it } + fadeOut(),
+                visible = dockedSearch || dockedFocused,
+                enter = fadeIn(),
+                exit = fadeOut(),
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
@@ -335,59 +364,22 @@ fun LexemeRoot(
                     .imePadding()
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             ) {
-                Bar(homeFocus, fromBottom = true, Modifier.fillMaxSize())
+                Bar(
+                    dockedFocus,
+                    fromBottom = true,
+                    Modifier.fillMaxSize(),
+                    fieldModifier = Modifier.sharedBounds(
+                        rememberSharedContentState(SearchMorphKey),
+                        animatedVisibilityScope = this,
+                        boundsTransform = SearchMorphBounds,
+                    ),
+                )
             }
 
+            // One rotating search scallop, bottom centre on every screen. On entries the actions
+            // sit in two see-through pills either side of it, and tuck into it while reading down.
             AnimatedVisibility(
-                visible = current != null && !focused,
-                enter = slideInVertically(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)) { it * 2 } + fadeIn(),
-                exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it * 2 } + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp),
-            ) {
-                val title = (current?.state as? PageState.Loaded)?.entry?.title ?: current?.title.orEmpty()
-                HorizontalFloatingToolbar(
-                    expanded = toolbarExpanded,
-                    floatingActionButton = {
-                        FloatingToolbarDefaults.VibrantFloatingActionButton(
-                            onClick = { focusRequester.requestFocus() },
-                            modifier = Modifier.testTag("toolbar_search"),
-                        ) {
-                            Icon(Icons.Rounded.Search, contentDescription = "Search")
-                        }
-                    },
-                    colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
-                    modifier = Modifier.testTag("toolbar"),
-                ) {
-                    IconButton(onClick = { vm.home() }, modifier = Modifier.testTag("toolbar_home")) {
-                        Icon(Icons.Rounded.Home, contentDescription = "Home")
-                    }
-                    IconButton(onClick = vm::random, modifier = Modifier.testTag("toolbar_random")) {
-                        Icon(Icons.Rounded.Shuffle, contentDescription = "Random word")
-                    }
-                    IconButton(
-                        onClick = {
-                            val id = current?.id ?: return@IconButton
-                            scope.launch { listStates[id]?.animateScrollToItem(0) }
-                        },
-                        modifier = Modifier.testTag("toolbar_top"),
-                    ) {
-                        Icon(Icons.Rounded.ArrowUpward, contentDescription = "Back to top")
-                    }
-                    IconButton(onClick = { share(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_share")) {
-                        Icon(Icons.Rounded.Share, contentDescription = "Share")
-                    }
-                    IconButton(onClick = { openExternal(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_browser")) {
-                        Icon(Icons.Rounded.OpenInBrowser, contentDescription = "Open on Wiktionary")
-                    }
-                }
-            }
-
-            // Landing page: a lone search button where the toolbar sits on entries.
-            AnimatedVisibility(
-                visible = current == null && !focused,
+                visible = !focused && !dockedSearch,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
                 exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
                 modifier = Modifier
@@ -395,7 +387,70 @@ fun LexemeRoot(
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp),
             ) {
-                SearchFab(onClick = { homeSearch = true })
+                val title = (current?.state as? PageState.Loaded)?.entry?.title ?: current?.title.orEmpty()
+                val pillsShown = current != null && toolbarExpanded
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Back to top floats just above the scallop, so the pills either side stay two and two.
+                AnimatedVisibility(
+                    visible = pillsShown,
+                    enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
+                        slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } + fadeIn(),
+                    exit = scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
+                        slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 2 } + fadeOut(),
+                ) {
+                    Surface(
+                        onClick = {
+                            val id = current?.id ?: return@Surface
+                            scope.launch { listStates[id]?.animateScrollToItem(0) }
+                        },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.86f),
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 10.dp).size(48.dp).testTag("toolbar_top"),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.ArrowUpward, contentDescription = "Back to top")
+                        }
+                    }
+                }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    SearchFab(
+                        onClick = { dockedSearch = true },
+                        modifier = Modifier.sharedBounds(
+                            rememberSharedContentState(SearchMorphKey),
+                            animatedVisibilityScope = this@AnimatedVisibility,
+                            boundsTransform = SearchMorphBounds,
+                        ),
+                    )
+                    // Left pill ends at the scallop's left edge, right pill starts at its right edge.
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                            ToolbarPill(pillsShown, towardEnd = true, tag = "toolbar") {
+                                IconButton(onClick = { vm.home() }, modifier = Modifier.testTag("toolbar_home")) {
+                                    Icon(Icons.Rounded.Home, contentDescription = "Home")
+                                }
+                                IconButton(onClick = vm::random, modifier = Modifier.testTag("toolbar_random")) {
+                                    Icon(Icons.Rounded.Shuffle, contentDescription = "Random word")
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(84.dp + 16.dp))
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            ToolbarPill(pillsShown, towardEnd = false, tag = "toolbar_end") {
+                                IconButton(onClick = { share(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_share")) {
+                                    Icon(Icons.Rounded.Share, contentDescription = "Share")
+                                }
+                                IconButton(onClick = { openExternal(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_browser")) {
+                                    Icon(Icons.Rounded.OpenInBrowser, contentDescription = "Open on Wiktionary")
+                                }
+                            }
+                        }
+                    }
+                }
+                }
             }
 
             SnackbarHost(
@@ -403,7 +458,7 @@ fun LexemeRoot(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 96.dp),
+                    .padding(bottom = 112.dp),
             )
 
             // Settings slide in over everything, springing a little on arrival.
@@ -430,5 +485,42 @@ fun LexemeRoot(
                 )
             }
         }
+        }
     }
+}
+
+/**
+ * Half of the entry toolbar beside the search scallop: semi-transparent, and springing in from
+ * (or tucking back into) the scallop's side. [towardEnd] means the scallop is on its right.
+ */
+@Composable
+private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, content: @Composable RowScope.() -> Unit) {
+    val origin = TransformOrigin(if (towardEnd) 1f else 0f, 0.5f)
+    AnimatedVisibility(
+        visible = visible,
+        enter = scaleIn(spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f, transformOrigin = origin) +
+            slideInHorizontally(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { if (towardEnd) it / 2 else -it / 2 } +
+            fadeIn(),
+        exit = scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.3f, transformOrigin = origin) +
+            slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { if (towardEnd) it / 2 else -it / 2 } +
+            fadeOut(),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            // See-through like the scallop, so the page shows behind; no shadow to darken it.
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.86f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.testTag(tag),
+        ) {
+            Row(Modifier.height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+        }
+    }
+}
+
+private const val SearchMorphKey = "searchMorph"
+
+/** A slightly bouncy spring for the scallop-to-bar morph, so the bar lands with a little give. */
+@OptIn(ExperimentalSharedTransitionApi::class)
+private val SearchMorphBounds = BoundsTransform { _, _ ->
+    spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = Rect.VisibilityThreshold)
 }

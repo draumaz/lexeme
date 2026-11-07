@@ -2,6 +2,7 @@ package io.github.draumaz.lexeme.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -188,3 +189,14 @@ class ScrollClaim {
 }
 
 val LocalScrollClaim = androidx.compose.runtime.staticCompositionLocalOf { ScrollClaim() }
+
+/** A slow, endless turn in degrees, for badges that idle by rotating. */
+@Composable
+fun rememberSpin(periodMillis: Int = 18_000): androidx.compose.runtime.State<Float> =
+    androidx.compose.animation.core.rememberInfiniteTransition(label = "spin").animateFloat(
+        0f, 360f,
+        androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(periodMillis, easing = androidx.compose.animation.core.LinearEasing)
+        ),
+        label = "spinAngle",
+    )

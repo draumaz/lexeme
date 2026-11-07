@@ -78,6 +78,8 @@ fun SearchBar(
     modifier: Modifier = Modifier,
     /** Docked at the bottom (the landing page): suggestions open upward, best match nearest the field. */
     fromBottom: Boolean = false,
+    /** Applied to the field itself, outermost; the docked bar passes its shared-bounds morph here. */
+    fieldModifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.Dp>()
@@ -101,7 +103,7 @@ fun SearchBar(
         Surface(
             shape = RoundedCornerShape(corner),
             color = container,
-            modifier = Modifier
+            modifier = fieldModifier
                 .fillMaxWidth()
                 .height(60.dp)
                 .shadow(elevation, RoundedCornerShape(corner)),

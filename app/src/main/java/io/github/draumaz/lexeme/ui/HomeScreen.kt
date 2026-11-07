@@ -277,7 +277,7 @@ fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 onClick()
             }
             .semantics { contentDescription = "Search" }
-            .testTag("home_search"),
+            .testTag("search_fab"),
         contentAlignment = Alignment.Center,
     ) {
         Box(
