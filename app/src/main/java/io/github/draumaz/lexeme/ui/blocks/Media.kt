@@ -4,12 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
@@ -67,6 +61,7 @@ import io.github.draumaz.lexeme.data.Image
 import io.github.draumaz.lexeme.data.USER_AGENT
 import io.github.draumaz.lexeme.ui.components.ShapeBadge
 import io.github.draumaz.lexeme.ui.components.pressScale
+import io.github.draumaz.lexeme.ui.components.rememberSpin
 import io.github.draumaz.lexeme.ui.theme.LexemeTheme
 
 /** Flips black line art to white for dark mode, keeping alpha. */
@@ -223,7 +218,12 @@ class AudioController(private val context: Context) {
             )
             runCatching {
                 setDataSource(context, url.toUri(), mapOf("User-Agent" to USER_AGENT))
-            }.onFailure { this@AudioController.stop(); return }
+            }.onFailure {
+                // Not yet assigned to [player], so stop() alone wouldn't free it.
+                release()
+                this@AudioController.stop()
+                return
+            }
             setOnPreparedListener {
                 preparing = null
                 playing = url
@@ -251,8 +251,8 @@ fun AudioButton(block: Block.Audio) {
     val haptics = LocalHapticFeedback.current
     val playing = audio.playing == block.url
     val preparing = audio.preparing == block.url
-    val spin = rememberInfiniteTransition(label = "spin")
-    val rotation by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart), label = "rot")
+    // Only an active button spins; idle ones don't keep the frame clock running.
+    val rotation = if (playing || preparing) rememberSpin(2400) else null
     val source = remember { MutableInteractionSource() }
     val colors = MaterialTheme.colorScheme
     val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
@@ -275,7 +275,7 @@ fun AudioButton(block: Block.Audio) {
                 shape = if (playing || preparing) MaterialShapes.Cookie9Sided else MaterialShapes.Circle,
                 color = if (playing) colors.onPrimary else colors.primary,
                 size = 30.dp,
-                rotation = { if (playing || preparing) rotation else 0f },
+                rotation = { rotation?.value ?: 0f },
             ) {
                 AnimatedContent(
                     targetState = playing to preparing,

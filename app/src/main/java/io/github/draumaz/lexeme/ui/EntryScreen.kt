@@ -1,5 +1,6 @@
 package io.github.draumaz.lexeme.ui
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -48,8 +49,8 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Lightbulb
-import androidx.compose.material.icons.rounded.MenuBook
-import androidx.compose.material.icons.rounded.Notes
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SearchOff
@@ -104,6 +105,7 @@ import io.github.draumaz.lexeme.ui.components.badgeShape
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.hueFor
 import io.github.draumaz.lexeme.ui.components.pressScale
+import io.github.draumaz.lexeme.ui.components.rememberStagger
 import io.github.draumaz.lexeme.ui.components.segmentShape
 import kotlinx.coroutines.launch
 
@@ -259,6 +261,9 @@ private fun EntryView(
 ) {
     val rows = remember(entry) { rowsFor(entry) }
     val languageRows = remember(rows) { rows.withIndex().filter { it.value is EntryRow.LanguageHeader }.map { it.index } }
+    val languageRowSet = remember(languageRows) { languageRows.toHashSet() }
+    // When this entry appeared: only rows composed right away stagger in.
+    val shownAt = remember(entry) { SystemClock.uptimeMillis() }
     val stickyOffset = with(LocalDensity.current) { 76.dp.roundToPx() }
     val scope = rememberCoroutineScope()
     val currentLanguage by remember(languageRows) {
@@ -266,7 +271,7 @@ private fun EntryView(
             // The language whose header has most recently passed under the pinned picker.
             val info = listState.layoutInfo
             val line = stickyOffset + 8
-            val passed = info.visibleItemsInfo.lastOrNull { it.key.toString().startsWith("lang-") && it.offset <= line }
+            val passed = info.visibleItemsInfo.lastOrNull { it.index in languageRowSet && it.offset <= line }
             if (passed != null) {
                 languageRows.indexOf(passed.index).coerceAtLeast(0)
             } else {
@@ -284,8 +289,8 @@ private fun EntryView(
     val outer = LocalLinkHandler.current
     val handler = remember(entry, outer) {
         { link: Link ->
-            val sameEntry = link is Link.Wiki && link.title == entry.title && link.fragment != null
-            val target = if (sameEntry) languageIndexFor(entry, (link as Link.Wiki).fragment!!) else -1
+            val fragment = (link as? Link.Wiki)?.takeIf { it.title == entry.title }?.fragment
+            val target = if (fragment != null) languageIndexFor(entry, fragment) else -1
             if (target >= 0) scrollToLanguage(target) else outer(link)
         }
     }
@@ -309,24 +314,28 @@ private fun EntryView(
                 .testTag("entry_list"),
         ) {
             rows.forEachIndexed { rowIndex, row ->
-                val order = rowIndex.coerceAtMost(8)
                 when (row) {
                     EntryRow.Title -> item(key = row.key) {
-                        EntryTitle(entry, Modifier.bouncyEnter(row.key, seen, 0))
+                        val fresh = remember { row.key !in seen }
+                        EntryTitle(entry, animate = fresh, modifier = Modifier.bouncyEnter(row.key, seen, 0))
                     }
                     EntryRow.Chips -> stickyHeader(key = row.key) {
                         LanguagePicker(entry.languages, currentLanguage, ::scrollToLanguage)
                     }
                     is EntryRow.LanguageHeader -> item(key = row.key) {
-                        LanguageHeader(row.lang, row.index, Modifier.animateItem().bouncyEnter(row.key, seen, order))
+                        val order = rememberStagger(rowIndex.coerceAtMost(8), shownAt)
+                        val fresh = remember { row.key !in seen }
+                        LanguageHeader(row.lang, row.index, wobbleIn = fresh, modifier = Modifier.animateItem().bouncyEnter(row.key, seen, order))
                     }
                     is EntryRow.Strokes -> item(key = row.key) {
+                        val order = rememberStagger(rowIndex.coerceAtMost(8), shownAt)
                         StrokeOrderCard(
                             row.lang.strokeOrder,
                             Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).bouncyEnter(row.key, seen, order),
                         )
                     }
                     is EntryRow.Intro -> item(key = row.key) {
+                        val order = rememberStagger(rowIndex.coerceAtMost(8), shownAt)
                         Surface(
                             shape = segmentShape(row.first, row.last),
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -341,6 +350,7 @@ private fun EntryView(
                         }
                     }
                     is EntryRow.SectionRow -> item(key = row.key) {
+                        val order = rememberStagger(rowIndex.coerceAtMost(8), shownAt)
                         SectionCard(row, Modifier.bouncyEnter(row.key, seen, order))
                     }
                 }
@@ -359,13 +369,14 @@ private fun EntryView(
 }
 
 @Composable
-private fun EntryTitle(entry: Entry, modifier: Modifier = Modifier) {
+private fun EntryTitle(entry: Entry, animate: Boolean, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 12.dp)) {
         PoppingTitle(
             entry.title,
             style = MaterialTheme.typography.displayMediumEmphasized,
             color = colors.onSurface,
+            animate = animate,
             modifier = Modifier.testTag("entry_title"),
         )
         Spacer(Modifier.height(6.dp))
@@ -454,8 +465,10 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                     enter = expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
                     exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
                 ) {
-                    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selected - 2).coerceAtLeast(0))
+                    val firstShown = remember { (selected - 2).coerceAtLeast(0) }
+                    val listState = rememberLazyListState(initialFirstVisibleItemIndex = firstShown)
                     val seen = remember { HashSet<Any>() }
+                    val openedAt = remember { SystemClock.uptimeMillis() }
                     val listSpin by rememberSpin(22_000)
                     // Keep drags here to the list: no toolbar tuck, no chaining into the page.
                     val claim = io.github.draumaz.lexeme.ui.components.LocalScrollClaim.current
@@ -486,6 +499,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                             val isSelected = index == selected
                             val h = hueFor(lang.name)
                             val bg by animateColorAsState(if (isSelected) colors.secondaryContainer else Color.Transparent, label = "optionBg")
+                            val order = rememberStagger((index - firstShown).coerceIn(0, 8), openedAt)
                             Surface(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
@@ -494,7 +508,7 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                                 },
                                 shape = RoundedCornerShape(16.dp),
                                 color = bg,
-                                modifier = Modifier.fillMaxWidth().bouncyEnter(lang.id + index, seen, index - listState.firstVisibleItemIndex).testTag("language_option_$index"),
+                                modifier = Modifier.fillMaxWidth().bouncyEnter(lang.id + index, seen, order).testTag("language_option_$index"),
                             ) {
                                 Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     ShapeBadge(badgeShape(index), h.container, size = 32.dp, rotation = { listSpin + index * 37f }) {
@@ -528,9 +542,10 @@ private fun initials(name: String): String {
 }
 
 @Composable
-private fun LanguageHeader(lang: LanguageEntry, index: Int, modifier: Modifier = Modifier) {
+private fun LanguageHeader(lang: LanguageEntry, index: Int, wobbleIn: Boolean, modifier: Modifier = Modifier) {
     val hue = hueFor(lang.name)
-    val wobble = remember { Animatable(-60f) }
+    // Wobbles in on first sight only, not every time it scrolls back into view.
+    val wobble = remember { Animatable(if (wobbleIn) -60f else 0f) }
     LaunchedEffect(Unit) { wobble.animateTo(0f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessLow)) }
     Row(
         modifier
@@ -569,8 +584,8 @@ private fun lookOf(kind: SectionKind) = when (kind) {
     SectionKind.RELATIONS -> KindLook(Icons.Rounded.Hub, MaterialShapes.SoftBurst)
     SectionKind.USAGE -> KindLook(Icons.Rounded.Lightbulb, MaterialShapes.Gem)
     SectionKind.CHARACTER -> KindLook(Icons.Rounded.Draw, MaterialShapes.Cookie6Sided)
-    SectionKind.REFERENCES -> KindLook(Icons.Rounded.MenuBook, MaterialShapes.Pentagon)
-    SectionKind.OTHER -> KindLook(Icons.Rounded.Notes, MaterialShapes.Puffy)
+    SectionKind.REFERENCES -> KindLook(Icons.AutoMirrored.Rounded.MenuBook, MaterialShapes.Pentagon)
+    SectionKind.OTHER -> KindLook(Icons.AutoMirrored.Rounded.Notes, MaterialShapes.Puffy)
 }
 
 @Composable

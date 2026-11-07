@@ -102,7 +102,15 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
     }
 
     companion object {
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        /**
+         * One client for the whole app (API and image loading), so they share a connection
+         * pool and the TLS handshake to Wikimedia is paid once.
+         */
+        fun defaultClient(): OkHttpClient = shared
+
+        private val shared: OkHttpClient by lazy { build() }
+
+        private fun build(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->

@@ -21,6 +21,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Matrix
@@ -98,32 +100,129 @@ fun Modifier.bouncyEnter(key: Any, seen: MutableSet<Any>, order: Int = 0): Modif
     }
 }
 
-/** A title whose characters bounce in one after another. */
+/**
+ * Scripts whose letters render the same drawn one cluster at a time. Everything else (Arabic
+ * joining, Indic conjuncts, right-to-left order) needs the whole word shaped as one run.
+ */
+private val SplittableScripts = setOf(
+    Character.UnicodeScript.COMMON, Character.UnicodeScript.INHERITED,
+    Character.UnicodeScript.LATIN, Character.UnicodeScript.GREEK, Character.UnicodeScript.CYRILLIC,
+    Character.UnicodeScript.ARMENIAN, Character.UnicodeScript.GEORGIAN, Character.UnicodeScript.HAN,
+    Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA, Character.UnicodeScript.HANGUL,
+    Character.UnicodeScript.BOPOMOFO, Character.UnicodeScript.ETHIOPIC, Character.UnicodeScript.CHEROKEE,
+)
+
+private fun isRtl(cp: Int): Boolean = when (Character.getDirectionality(cp)) {
+    Character.DIRECTIONALITY_RIGHT_TO_LEFT, Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> true
+    else -> false
+}
+
+/**
+ * [text] as words of grapheme clusters (a trailing space stays on its word), or null when
+ * splitting would change how it renders.
+ */
+private fun splitForPopping(text: String): List<List<String>>? {
+    if (text.codePoints().anyMatch { isRtl(it) || Character.UnicodeScript.of(it) !in SplittableScripts }) return null
+    val breaks = java.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+    val words = mutableListOf<MutableList<String>>(mutableListOf())
+    var start = breaks.first()
+    var end = breaks.next()
+    while (end != java.text.BreakIterator.DONE) {
+        val cluster = text.substring(start, end)
+        words.last().add(cluster)
+        if (cluster.isBlank()) words.add(mutableListOf())
+        start = end
+        end = breaks.next()
+    }
+    return words.filter { it.isNotEmpty() }
+}
+
+/**
+ * A title whose letters bounce in one after another. Scripts that can't be drawn letter by
+ * letter pop in as a whole word instead. With [animate] off it just shows the text, so
+ * scrolling back to it (or returning to the page) doesn't replay the entrance.
+ */
 @Composable
-fun PoppingTitle(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
-    // One readable node for accessibility, not a letter per node.
+fun PoppingTitle(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier, animate: Boolean = true) {
+    val words = remember(text) { splitForPopping(text) }
+    if (!animate || words == null) {
+        val scale = remember(text) { Animatable(if (animate) 0.6f else 1f) }
+        LaunchedEffect(text) { scale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium)) }
+        Text(
+            text,
+            style = style,
+            color = color,
+            modifier = modifier.graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+                alpha = (scale.value * 1.4f - 0.4f).coerceIn(0f, 1f)
+                transformOrigin = TransformOrigin(0f, 1f)
+            },
+        )
+        return
+    }
+    // One readable node for accessibility, not a letter per node. Words wrap as units; a
+    // word wider than the line still wraps between its letters rather than clipping.
     androidx.compose.foundation.layout.FlowRow(modifier.clearAndSetSemantics { contentDescription = text }) {
-        val chars = remember(text) { text.codePoints().toArray().map { String(Character.toChars(it)) } }
-        chars.forEachIndexed { index, ch ->
-            androidx.compose.runtime.key(text, index) {
-                val scale = remember { Animatable(0.2f) }
-                LaunchedEffect(Unit) {
-                    delay(index.coerceAtMost(24) * 28L)
-                    scale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium))
+        var index = 0
+        words.forEach { word ->
+            androidx.compose.foundation.layout.FlowRow {
+                word.forEach { cluster ->
+                    val order = index++
+                    androidx.compose.runtime.key(text, order) {
+                        val scale = remember { Animatable(0.2f) }
+                        LaunchedEffect(Unit) {
+                            delay(order.coerceAtMost(24) * 28L)
+                            scale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium))
+                        }
+                        Text(
+                            cluster,
+                            style = style,
+                            color = color,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = scale.value
+                                scaleY = scale.value
+                                alpha = (scale.value * 1.4f).coerceIn(0f, 1f)
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                            },
+                        )
+                    }
                 }
-                Text(
-                    ch,
-                    style = style,
-                    color = color,
-                    modifier = Modifier.graphicsLayer {
-                        scaleX = scale.value
-                        scaleY = scale.value
-                        alpha = (scale.value * 1.4f).coerceIn(0f, 1f)
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                    },
-                )
             }
         }
+    }
+}
+
+/**
+ * The [bouncyEnter] stagger slot for an item first composed [sinceMillis] after the screen
+ * appeared at [shownAt] (uptime): the first screenful staggers by [order], anything reached
+ * later by scrolling pops in at once instead of sitting blank while a delay runs out.
+ */
+@Composable
+fun rememberStagger(order: Int, shownAt: Long): Int =
+    remember { if (android.os.SystemClock.uptimeMillis() - shownAt < STAGGER_WINDOW_MS) order else 0 }
+
+private const val STAGGER_WINDOW_MS = 400L
+
+/**
+ * Fills [morph] at [progress], turned by [rotation] degrees, all read in the draw phase:
+ * an endlessly morphing or spinning shape then only redraws, never recomposes.
+ */
+fun Modifier.morphBackground(
+    color: Color,
+    morph: () -> Morph,
+    progress: () -> Float = { 0f },
+    rotation: () -> Float = { 0f },
+): Modifier = drawWithCache {
+    val path = androidx.compose.ui.graphics.Path()
+    val matrix = Matrix()
+    onDrawBehind {
+        path.rewind()
+        morph().toPath(progress(), path)
+        matrix.reset()
+        matrix.scale(size.width, size.height)
+        path.transform(matrix)
+        rotate(rotation()) { drawPath(path, color) }
     }
 }
 

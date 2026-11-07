@@ -58,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -72,7 +73,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
-import io.github.draumaz.lexeme.ui.components.MorphShape
+import io.github.draumaz.lexeme.ui.components.morphBackground
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
 import io.github.draumaz.lexeme.ui.theme.Wordmark
@@ -172,7 +173,7 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        words.forEachIndexed { index, word ->
+        words.forEachIndexed { index, word -> key(word) {
             val source = remember { MutableInteractionSource() }
             Surface(
                 onClick = {
@@ -194,7 +195,7 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                 )
             }
-        }
+        } }
     }
 }
 
@@ -223,12 +224,7 @@ private fun HeroMark(modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     val colors = MaterialTheme.colorScheme
 
-    val index = phase.toInt().coerceIn(0, shapes.lastIndex)
-    // Hold each shape, then morph over the last 40% of its slot.
-    val local = ((phase - index - 0.6f) / 0.4f).coerceIn(0f, 1f)
-    val progress = FastOutSlowInEasing.transform(local)
-    val shape = MorphShape(morphs[index], progress)
-
+    // Phase and spin are read only while drawing, so the endless morph never recomposes.
     Box(
         modifier
             .size(140.dp)
@@ -246,8 +242,16 @@ private fun HeroMark(modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { rotationZ = spin }
-                .background(colors.primaryContainer, shape)
+                .morphBackground(
+                    colors.primaryContainer,
+                    morph = { morphs[phase.toInt().coerceIn(0, shapes.lastIndex)] },
+                    // Hold each shape, then morph over the last 40% of its slot.
+                    progress = {
+                        val index = phase.toInt().coerceIn(0, shapes.lastIndex)
+                        FastOutSlowInEasing.transform(((phase - index - 0.6f) / 0.4f).coerceIn(0f, 1f))
+                    },
+                    rotation = { spin },
+                )
         )
         Icon(Icons.Rounded.AutoStories, null, Modifier.size(68.dp), tint = colors.onPrimaryContainer)
     }
@@ -266,7 +270,7 @@ fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val colors = MaterialTheme.colorScheme
-    val shape = remember { MorphShape(Morph(MaterialShapes.Cookie12Sided, MaterialShapes.Cookie12Sided), 0f) }
+    val shape = remember { Morph(MaterialShapes.Cookie12Sided, MaterialShapes.Cookie12Sided) }
     Box(
         modifier
             .size(84.dp)
@@ -283,8 +287,11 @@ fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .matchParentSize()
-                .graphicsLayer { rotationZ = idleRotation + kick.value }
-                .background(colors.primaryContainer.copy(alpha = 0.88f), shape)
+                .morphBackground(
+                    colors.primaryContainer.copy(alpha = 0.88f),
+                    morph = { shape },
+                    rotation = { idleRotation + kick.value },
+                )
         )
         Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.onPrimaryContainer, modifier = Modifier.size(38.dp))
     }

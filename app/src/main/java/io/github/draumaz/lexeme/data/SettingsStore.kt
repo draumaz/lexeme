@@ -1,6 +1,7 @@
 package io.github.draumaz.lexeme.data
 
 import android.content.Context
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,12 +23,12 @@ class SettingsStore(context: Context) {
 
     fun setDynamicColor(on: Boolean) {
         _dynamicColor.value = on
-        prefs.edit().putBoolean(DYNAMIC, on).apply()
+        prefs.edit { putBoolean(DYNAMIC, on) }
     }
 
     fun setThemeMode(mode: ThemeMode) {
         _themeMode.value = mode
-        prefs.edit().putString(THEME, mode.name).apply()
+        prefs.edit { putString(THEME, mode.name) }
     }
 
     private companion object {

@@ -18,7 +18,6 @@ import io.github.draumaz.lexeme.data.ThemeMode
 import io.github.draumaz.lexeme.ui.LexemeRoot
 import io.github.draumaz.lexeme.ui.LexemeViewModel
 import io.github.draumaz.lexeme.ui.theme.LexemeTheme
-import java.net.URLDecoder
 
 class MainActivity : ComponentActivity() {
     private val vm: LexemeViewModel by viewModels()
@@ -64,8 +63,8 @@ class MainActivity : ComponentActivity() {
                 intent.getStringExtra(Intent.EXTRA_TEXT)?.let(vm::open)
             Intent.ACTION_VIEW -> {
                 val uri = intent.data ?: return
-                val path = uri.encodedPath?.removePrefix("/wiki/") ?: return
-                val title = URLDecoder.decode(path, "UTF-8").replace('_', ' ')
+                // A path, not a form: "+" is literal (C++), only %XX escapes decode.
+                val title = uri.path?.removePrefix("/wiki/")?.replace('_', ' ') ?: return
                 vm.open(title, uri.fragment)
             }
         }

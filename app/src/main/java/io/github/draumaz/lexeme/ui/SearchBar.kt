@@ -46,7 +46,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +103,18 @@ fun SearchBar(
     // The row Enter will open gets highlighted, so pressing search is never a surprise.
     val picked = if (showingRecent) null else suggestions.pickFor(query)
 
+    // The field keeps its own selection, so filling in a suggestion can put the caret at the
+    // end. The query flow lags typing by a frame, so it only overwrites the field while the
+    // field isn't being typed in (opening a page clears it; the other bar's typing shows here).
+    var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
+    fun setText(text: String) {
+        field = TextFieldValue(text, TextRange(text.length))
+        onQueryChange(text)
+    }
+    LaunchedEffect(query, focused) {
+        if (!focused && field.text != query) field = TextFieldValue(query, TextRange(query.length))
+    }
+
     val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
     @Composable
     fun Field() {
@@ -132,8 +150,12 @@ fun SearchBar(
                 Spacer(Modifier.width(4.dp))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     BasicTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
+                        value = field,
+                        onValueChange = {
+                            val changed = it.text != field.text
+                            field = it
+                            if (changed) onQueryChange(it.text)
+                        },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
                         cursorBrush = SolidColor(colors.primary),
@@ -142,14 +164,14 @@ fun SearchBar(
                             autoCorrectEnabled = false,
                             imeAction = ImeAction.Search,
                         ),
-                        keyboardActions = KeyboardActions(onSearch = { onSubmit(picked ?: query) }),
+                        keyboardActions = KeyboardActions(onSearch = { onSubmit(picked ?: field.text) }),
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(focusRequester)
                             .onFocusChanged { onFocusChange(it.isFocused) }
                             .testTag("search_field"),
                         decorationBox = { inner ->
-                            if (query.isEmpty()) {
+                            if (field.text.isEmpty()) {
                                 Text(
                                     "Search Wiktionary",
                                     style = MaterialTheme.typography.bodyLarge,
@@ -161,11 +183,11 @@ fun SearchBar(
                     )
                 }
                 AnimatedVisibility(
-                    query.isNotEmpty(),
+                    field.text.isNotEmpty(),
                     enter = scaleIn(fastSpec) + fadeIn(),
                     exit = scaleOut(fastSpec) + fadeOut(),
                 ) {
-                    IconButton(onClick = { onQueryChange("") }, modifier = Modifier.testTag("clear_button")) {
+                    IconButton(onClick = { setText("") }, modifier = Modifier.testTag("clear_button")) {
                         Icon(Icons.Rounded.Close, contentDescription = "Clear")
                     }
                 }
@@ -198,7 +220,7 @@ fun SearchBar(
                         .padding(vertical = 8.dp)
                 ) {
                     val ordered = if (fromBottom) items.withIndex().reversed() else items.withIndex().toList()
-                    ordered.forEach { (index, item) ->
+                    ordered.forEach { (index, item) -> key(item) {
                         val highlighted = item == picked
                         val rowColor by animateColorAsState(
                             if (highlighted) colors.secondaryContainer else colors.surfaceContainerHigh,
@@ -235,12 +257,12 @@ fun SearchBar(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f),
                                 )
-                                IconButton(onClick = { onQueryChange(item) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { setText(item) }, modifier = Modifier.size(32.dp)) {
                                     Icon(if (fromBottom) Icons.Rounded.SouthWest else Icons.Rounded.NorthWest, contentDescription = "Fill in $item", tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
-                    }
+                    } }
                 }
             }
         }

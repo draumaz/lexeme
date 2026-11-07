@@ -1,6 +1,7 @@
 package io.github.draumaz.lexeme.data
 
 import android.content.Context
+import androidx.core.content.edit
 import org.json.JSONArray
 
 /** Recent lookups, newest first, in SharedPreferences. Small enough that a JSON array is plenty. */
@@ -13,7 +14,7 @@ class HistoryStore(context: Context) {
     }.getOrDefault(emptyList())
 
     fun save(items: List<String>) {
-        prefs.edit().putString(KEY, JSONArray(items).toString()).apply()
+        prefs.edit { putString(KEY, JSONArray(items).toString()) }
     }
 
     companion object {

@@ -94,6 +94,8 @@ import io.github.draumaz.lexeme.data.Link
 import io.github.draumaz.lexeme.ui.blocks.AudioController
 import io.github.draumaz.lexeme.ui.blocks.LocalAudio
 import io.github.draumaz.lexeme.ui.blocks.LocalLinkHandler
+import io.github.draumaz.lexeme.ui.components.LocalScrollClaim
+import io.github.draumaz.lexeme.ui.components.ScrollClaim
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -150,10 +152,12 @@ fun LexemeRoot(
         focusManager.clearFocus()
         keyboard?.hide()
     }
-    LaunchedEffect(pages) {
-        val ids = pages.map { it.id }.toSet()
-        listStates.keys.retainAll(ids)
-        seenSets.keys.retainAll(ids)
+    // Keyed on the stack itself, not page contents: a page finishing loading in the
+    // background mustn't cut off a pronunciation that's playing.
+    val pageIds = pages.map { it.id }
+    LaunchedEffect(pageIds) {
+        listStates.keys.retainAll(pageIds.toSet())
+        seenSets.keys.retainAll(pageIds.toSet())
         audio.stop()
     }
 
@@ -207,7 +211,9 @@ fun LexemeRoot(
     // The toolbar tucks into its FAB while reading down, and comes back on any upward scroll.
     // Scrolls claimed by an inner list (the language picker) don't count.
     var toolbarExpanded by remember { mutableStateOf(true) }
-    val scrollClaim = remember { io.github.draumaz.lexeme.ui.components.ScrollClaim() }
+    // Every new (or returned-to) page starts with its toolbar out.
+    LaunchedEffect(topId) { toolbarExpanded = true }
+    val scrollClaim = remember { ScrollClaim() }
     val nested = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
@@ -229,7 +235,7 @@ fun LexemeRoot(
 
     CompositionLocalProvider(
         LocalLinkHandler provides linkHandler,
-        io.github.draumaz.lexeme.ui.components.LocalScrollClaim provides scrollClaim,
+        LocalScrollClaim provides scrollClaim,
         LocalAudio provides audio,
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
     ) {

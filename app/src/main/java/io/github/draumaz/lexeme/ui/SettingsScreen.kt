@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.graphics.shapes.Morph
-import io.github.draumaz.lexeme.ui.components.MorphShape
+import io.github.draumaz.lexeme.ui.components.morphBackground
 import io.github.draumaz.lexeme.ui.components.pressScale
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -397,8 +397,12 @@ fun SettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .matchParentSize()
-                .graphicsLayer { rotationZ = spin + kick.value }
-                .background(colors.secondaryContainer, MorphShape(morph, morphProgress))
+                .morphBackground(
+                    colors.secondaryContainer,
+                    morph = { morph },
+                    progress = { morphProgress },
+                    rotation = { spin + kick.value },
+                )
         )
         Icon(
             Icons.Rounded.Settings,
