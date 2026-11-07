@@ -418,15 +418,38 @@ object WiktionaryParser {
         }
 
         private fun etymologyTree(el: Element): List<Block> {
-            val nodes = el.select(".etytree-block").filterNot { it.hasClass("etytree-termless-block") }.mapNotNull { b ->
-                val term = rich(b.selectFirst(".etytree-term")) ?: return@mapNotNull null
-                EtymologyNode(
-                    language = b.selectFirst(".etyl")?.text()?.trim().orEmpty(),
-                    term = term,
-                    relation = b.selectFirst(".etytree-label abbr")?.attr("title")?.ifBlank { null },
-                )
+            val body = el.selectFirst(".etytree-body") ?: el
+            val root = etymologyBranch(body)
+            return if (root.size >= 2) listOf(Block.EtymologyTree(root)) else emptyList()
+        }
+
+        /** Walks a branch's children in order: a branch-group merges its branches, blocks extend the chain. */
+        private fun etymologyBranch(container: Element): EtymologyBranch {
+            var sources = emptyList<EtymologyBranch>()
+            val chain = mutableListOf<EtymologyNode>()
+            for (child in container.children()) {
+                when {
+                    child.hasClass("etytree-branch-group") -> {
+                        val merged = child.children().filter { it.hasClass("etytree-branch") }.map(::etymologyBranch)
+                            .filter { it.size > 0 }
+                        // A merge after some descent: what came before becomes one of the merging limbs.
+                        sources = if (chain.isEmpty() && sources.isEmpty()) merged
+                        else listOf(EtymologyBranch(sources, chain.toList())) + merged
+                        chain.clear()
+                    }
+                    child.hasClass("etytree-block") && !child.hasClass("etytree-termless-block") -> {
+                        val term = rich(child.selectFirst(".etytree-term")) ?: continue
+                        chain += EtymologyNode(
+                            language = child.selectFirst(".etyl")?.text()?.trim().orEmpty(),
+                            term = term,
+                            relation = child.selectFirst(".etytree-label abbr")?.attr("title")?.ifBlank { null },
+                        )
+                    }
+                }
             }
-            return if (nodes.size >= 2) listOf(Block.EtymologyTree(nodes)) else emptyList()
+            // A single merging limb is just a longer line.
+            if (sources.size == 1) return EtymologyBranch(sources[0].sources, sources[0].chain + chain)
+            return EtymologyBranch(sources, chain)
         }
 
         private fun media(el: Element): List<Block> {

@@ -3,11 +3,12 @@
 An Android Wiktionary reader in Kotlin and Jetpack Compose, styled with Material 3 Expressive.
 Type a word to get the full English Wiktionary entry, laid out as cards:
 
-- every language on the page, with sticky language chips that follow your scroll position
+- every language on the page, with a pinned language switcher that follows your scroll position
 - senses with numbered shape badges, usage examples, quotations that fold away
 - declension, conjugation and other inflection tables drawn as real grids (rowspan and colspan handled)
 - stroke-order animations lifted into their own card at the top of the language
-- audio pronunciations, IPA, images (line art inverts in dark mode), etymology trees
+- audio pronunciations, IPA, images (line art inverts in dark mode)
+- etymology trees drawn left to right as branches, with merging roots kept as real forks
 - collapsible translation boxes and term lists as tappable chips; every word link opens in the app
 
 ## Build

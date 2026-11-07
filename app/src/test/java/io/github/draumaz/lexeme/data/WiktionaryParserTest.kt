@@ -149,6 +149,30 @@ class WiktionaryParserTest {
         }
     }
 
+    @Test
+    fun etymologyTreeKeepsMergingBranches() {
+        fun block(lang: String, term: String, label: String? = null) =
+            """<div class="etytree-block"><span class="etyl">$lang</span> <span class="etytree-term"><i>$term</i></span>""" +
+                (label?.let { """<span class="etytree-label"><abbr title="$it">x</abbr></span>""" } ?: "") + "</div>"
+        fun branch(vararg parts: String) = """<div class="etytree-branch">${parts.joinToString("")}</div>"""
+        fun group(vararg branches: String) = """<div class="etytree-branch-group">${branches.joinToString("")}</div>"""
+        val tree = """<div class="etytree NavFrame"><div class="NavHead"><div>Etymology tree</div></div><div class="NavContent"><div class="etytree-body">""" +
+            group(
+                branch(
+                    group(
+                        branch(block("PIE", "*gʷṓws"), block("Ancient Greek", "βοῦς")),
+                        branch(group(branch(block("PIE", "*tewh₂-")), branch(block("PIE", "*-rós"))), block("Ancient Greek", "τυρός")),
+                    ),
+                    block("Ancient Greek", "βούτυρον"), block("Latin", "būtȳrum", "loanword"), block("English", "butter"),
+                ),
+            ) + "</div></div></div>"
+        val entry = WiktionaryParser.parse("butter", page(h(2, "English") + h(3, "Etymology") + tree))
+        val t = entry.languages[0].sections[0].blocks.filterIsInstance<Block.EtymologyTree>().single()
+        assertEquals("(*gʷṓws > βοῦς + (*tewh₂- + *-rós) > τυρός) > βούτυρον > būtȳrum > butter", branch(t.root))
+        assertEquals("loanword", t.root.chain[1].relation)
+        assertEquals(8, t.root.size)
+    }
+
     private fun describe(b: Block): String = when (b) {
         is Block.Paragraph -> "P${if (b.role == Block.Paragraph.Role.Headword) "(head)" else ""}'${b.text.text.take(40).replace('\n', '|')}'"
         is Block.ListBlock -> "${b.style}[${b.items.size}]"
@@ -157,9 +181,13 @@ class WiktionaryParserTest {
         is Block.Images -> "Img${b.images.map { it.url.substringAfterLast('/') }}"
         is Block.Audio -> "Audio(${b.label})"
         is Block.Collapsible -> "Fold('${b.title.text.take(30)}', ${b.blocks.map(::describe)})"
-        is Block.EtymologyTree -> "Tree${b.nodes.map { it.language + ":" + it.term.text }}"
+        is Block.EtymologyTree -> "Tree${branch(b.root)}"
         is Block.StrokeOrder -> "Strokes"
     }
+
+    private fun branch(b: EtymologyBranch): String =
+        (if (b.sources.isEmpty()) "" else b.sources.joinToString(" + ", "(", ") > ") { branch(it) }) +
+            b.chain.joinToString(" > ") { it.term.text }
 
     companion object {
         const val SAMPLES = "LEXEME_SAMPLES"

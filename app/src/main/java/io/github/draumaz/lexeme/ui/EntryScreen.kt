@@ -77,6 +77,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -454,11 +455,30 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
                 ) {
                     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selected - 2).coerceAtLeast(0))
                     val seen = remember { HashSet<Any>() }
+                    // Keep drags here to the list: no toolbar tuck, no chaining into the page.
+                    val claim = io.github.draumaz.lexeme.ui.components.LocalScrollClaim.current
+                    val contain = remember(claim) {
+                        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                            override fun onPostScroll(
+                                consumed: androidx.compose.ui.geometry.Offset,
+                                available: androidx.compose.ui.geometry.Offset,
+                                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+                            ): androidx.compose.ui.geometry.Offset {
+                                claim.claimed = true
+                                return available
+                            }
+
+                            override suspend fun onPostFling(
+                                consumed: androidx.compose.ui.unit.Velocity,
+                                available: androidx.compose.ui.unit.Velocity,
+                            ) = available
+                        }
+                    }
                     LazyColumn(
                         state = listState,
                         contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
-                        modifier = Modifier.heightIn(max = 380.dp).testTag("language_list"),
+                        modifier = Modifier.heightIn(max = 380.dp).nestedScroll(contain).testTag("language_list"),
                     ) {
                         itemsIndexed(languages, key = { i, l -> "${l.id}-$i" }) { index, lang ->
                             val isSelected = index == selected

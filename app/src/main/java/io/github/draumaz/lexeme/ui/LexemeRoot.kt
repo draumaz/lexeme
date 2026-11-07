@@ -164,11 +164,18 @@ fun LexemeRoot(
     BackHandler(enabled = focused) { focusManager.clearFocus() }
 
     // The toolbar tucks into its FAB while reading down, and comes back on any upward scroll.
+    // Scrolls claimed by an inner list (the language picker) don't count.
     var toolbarExpanded by remember { mutableStateOf(true) }
+    val scrollClaim = remember { io.github.draumaz.lexeme.ui.components.ScrollClaim() }
     val nested = remember {
         object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -8f) toolbarExpanded = false else if (available.y > 8f) toolbarExpanded = true
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (scrollClaim.claimed) {
+                    scrollClaim.claimed = false
+                    return Offset.Zero
+                }
+                val dy = consumed.y + available.y
+                if (dy < -8f) toolbarExpanded = false else if (dy > 8f) toolbarExpanded = true
                 return Offset.Zero
             }
         }
@@ -181,6 +188,7 @@ fun LexemeRoot(
 
     CompositionLocalProvider(
         LocalLinkHandler provides linkHandler,
+        io.github.draumaz.lexeme.ui.components.LocalScrollClaim provides scrollClaim,
         LocalAudio provides audio,
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
     ) {

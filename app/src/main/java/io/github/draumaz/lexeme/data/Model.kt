@@ -96,8 +96,8 @@ sealed interface Block {
     /** A NavFrame or collapsible box: a title bar that hides [blocks] until expanded. */
     data class Collapsible(val title: RichText, val blocks: List<Block>, val startExpanded: Boolean) : Block
 
-    /** The "Etymology tree" box: a chain of ancestor terms, oldest first. */
-    data class EtymologyTree(val nodes: List<EtymologyNode>) : Block
+    /** The "Etymology tree" box: source branches merging, oldest first, into this page's word. */
+    data class EtymologyTree(val root: EtymologyBranch) : Block
 
     /** Stroke-order images; lifted into [LanguageEntry.strokeOrder] after parsing. */
     data class StrokeOrder(val images: List<Image>) : Block
@@ -136,6 +136,14 @@ data class Image(
 }
 
 data class EtymologyNode(val language: String, val term: RichText, val relation: String?)
+
+/**
+ * One limb of an etymology tree: [sources] (each its own limb) merge, then the term passes
+ * through [chain], oldest first. A plain line of descent has no sources.
+ */
+data class EtymologyBranch(val sources: List<EtymologyBranch>, val chain: List<EtymologyNode>) {
+    val size: Int get() = chain.size + sources.sumOf { it.size }
+}
 
 /** Text plus styled ranges, mapped onto an AnnotatedString by the UI. */
 data class RichText(val text: String, val spans: List<Span>) {

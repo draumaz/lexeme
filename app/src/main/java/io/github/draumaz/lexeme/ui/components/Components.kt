@@ -178,3 +178,13 @@ fun segmentShape(first: Boolean, last: Boolean, outer: Dp = 28.dp, inner: Dp = 8
     bottomStart = if (last) outer else inner,
     bottomEnd = if (last) outer else inner,
 )
+
+/**
+ * Lets an inner scroller (the language list) mark a scroll as its own, so page-level
+ * reactions like tucking the toolbar away ignore it. Inner post-scroll runs before outer.
+ */
+class ScrollClaim {
+    var claimed = false
+}
+
+val LocalScrollClaim = androidx.compose.runtime.staticCompositionLocalOf { ScrollClaim() }
