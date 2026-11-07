@@ -62,7 +62,6 @@ import io.github.draumaz.lexeme.data.RichText
 import io.github.draumaz.lexeme.ui.components.ShapeBadge
 import io.github.draumaz.lexeme.ui.components.badgeShape
 import io.github.draumaz.lexeme.ui.components.pressScale
-import io.github.draumaz.lexeme.ui.theme.Serif
 
 /** Nesting depth of sense lists, so sub-senses get smaller, quieter badges. */
 private val LocalSenseDepth = staticCompositionLocalOf { 0 }
@@ -104,8 +103,7 @@ private fun ParagraphView(p: Block.Paragraph) {
         RichTextView(
             p.text,
             // Short headword lines read as a title; long ones (German nouns list every form) step down.
-            style = (if (p.text.text.length <= 60) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
-                .copy(fontFamily = Serif),
+            style = (if (p.text.text.length <= 60) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium),
             modifier = Modifier.padding(bottom = 2.dp),
         )
     } else {

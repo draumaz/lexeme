@@ -104,7 +104,6 @@ import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.hueFor
 import io.github.draumaz.lexeme.ui.components.pressScale
 import io.github.draumaz.lexeme.ui.components.segmentShape
-import io.github.draumaz.lexeme.ui.theme.Serif
 import kotlinx.coroutines.launch
 
 @Composable
@@ -364,7 +363,7 @@ private fun EntryTitle(entry: Entry, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 12.dp)) {
         PoppingTitle(
             entry.title,
-            style = MaterialTheme.typography.displayMediumEmphasized.copy(fontFamily = Serif),
+            style = MaterialTheme.typography.displayMediumEmphasized,
             color = colors.onSurface,
             modifier = Modifier.testTag("entry_title"),
         )

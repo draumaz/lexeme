@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,6 +92,7 @@ fun wiktionaryUrl(title: String): String =
 @Composable
 fun LexemeRoot(
     vm: LexemeViewModel,
+    settings: io.github.draumaz.lexeme.data.SettingsStore,
     openExternal: (String) -> Unit,
     share: (String) -> Unit,
 ) {
@@ -101,7 +103,17 @@ fun LexemeRoot(
     val randomBusy by vm.randomBusy.collectAsStateWithLifecycle()
 
     var focused by remember { mutableStateOf(false) }
+    var settingsOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // Set by the landing page's search button; the bar composes first, then takes focus.
+    var homeSearch by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val homeFocus = remember { FocusRequester() }
+    LaunchedEffect(homeSearch) {
+        if (homeSearch) {
+            androidx.compose.runtime.withFrameNanos { }
+            homeFocus.requestFocus()
+        }
+    }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptics = LocalHapticFeedback.current
@@ -162,6 +174,18 @@ fun LexemeRoot(
         }
     }
     BackHandler(enabled = focused) { focusManager.clearFocus() }
+    // Settings get the same treatment: shrink under the finger, then slide away.
+    var settingsBack by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = settingsOpen) { events ->
+        try {
+            events.collect { settingsBack = it.progress }
+            settingsOpen = false
+        } catch (e: CancellationException) {
+            throw e
+        } finally {
+            settingsBack = 0f
+        }
+    }
 
     // The toolbar tucks into its FAB while reading down, and comes back on any upward scroll.
     // Scrolls claimed by an inner list (the language picker) don't count.
@@ -236,10 +260,10 @@ fun LexemeRoot(
                         HomeScreen(
                             recent = recent,
                             randomBusy = randomBusy,
-                            contentPadding = contentPadding,
                             onOpen = ::submit,
                             onRandom = vm::random,
                             onClearHistory = vm::clearHistory,
+                            onOpenSettings = { settingsOpen = true },
                         )
                     } else {
                         PageScreen(
@@ -263,25 +287,56 @@ fun LexemeRoot(
                 )
             }
 
-            SearchBar(
+            @Composable
+            fun Bar(requester: FocusRequester, fromBottom: Boolean, modifier: Modifier) = SearchBar(
                 query = query,
                 onQueryChange = { vm.query.value = it },
                 onSubmit = ::submit,
                 focused = focused,
-                onFocusChange = { focused = it },
-                focusRequester = focusRequester,
+                onFocusChange = {
+                    if (focused && !it) homeSearch = false
+                    focused = it
+                },
+                focusRequester = requester,
                 canGoBack = pages.isNotEmpty(),
                 onBack = {
                     if (focused) focusManager.clearFocus() else vm.back()
                 },
                 suggestions = suggestions,
                 recent = recent,
+                fromBottom = fromBottom,
+                modifier = modifier,
+            )
+
+            // Entry pages keep the bar pinned up top.
+            AnimatedVisibility(
+                visible = current != null,
+                enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn(),
+                exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { -it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp)
                     .fillMaxWidth(),
-            )
+            ) {
+                Bar(focusRequester, fromBottom = false, Modifier.fillMaxWidth())
+            }
+
+            // The landing page has no bar until its search button summons one, docked at the
+            // bottom where the button was and riding on top of the keyboard.
+            AnimatedVisibility(
+                visible = current == null && (homeSearch || focused),
+                enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
+                exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it } + fadeOut(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            ) {
+                Bar(homeFocus, fromBottom = true, Modifier.fillMaxSize())
+            }
 
             AnimatedVisibility(
                 visible = current != null && !focused,
@@ -330,6 +385,19 @@ fun LexemeRoot(
                 }
             }
 
+            // Landing page: a lone search button where the toolbar sits on entries.
+            AnimatedVisibility(
+                visible = current == null && !focused,
+                enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp),
+            ) {
+                SearchFab(onClick = { homeSearch = true })
+            }
+
             SnackbarHost(
                 snackbar,
                 Modifier
@@ -337,6 +405,30 @@ fun LexemeRoot(
                     .navigationBarsPadding()
                     .padding(bottom = 96.dp),
             )
+
+            // Settings slide in over everything, springing a little on arrival.
+            AnimatedVisibility(
+                visible = settingsOpen,
+                enter = slideInHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
+                exit = slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { it } + fadeOut(),
+            ) {
+                SettingsScreen(
+                    modifier = Modifier.graphicsLayer {
+                        val p = settingsBack
+                        val sc = 1f - 0.1f * p
+                        scaleX = sc
+                        scaleY = sc
+                        translationX = p * 32.dp.toPx()
+                        shape = RoundedCornerShape(40.dp * p)
+                        clip = p > 0f
+                    },
+                    settings = settings,
+                    recentCount = recent.size,
+                    onClearHistory = vm::clearHistory,
+                    openExternal = openExternal,
+                    onBack = { settingsOpen = false },
+                )
+            }
         }
     }
 }

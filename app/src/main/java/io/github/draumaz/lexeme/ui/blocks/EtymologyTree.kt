@@ -53,7 +53,6 @@ import io.github.draumaz.lexeme.data.EtymologyBranch
 import io.github.draumaz.lexeme.data.EtymologyNode
 import io.github.draumaz.lexeme.data.RichText
 import io.github.draumaz.lexeme.ui.components.ShapeBadge
-import io.github.draumaz.lexeme.ui.theme.Serif
 import kotlinx.coroutines.delay
 
 /**
@@ -181,7 +180,7 @@ private fun NodeCard(node: EtymologyNode, order: Int, word: Boolean) {
                 if (node.language.isNotEmpty()) {
                     Text(node.language, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                RichTextView(node.term, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = Serif, lineHeight = 18.sp))
+                RichTextView(node.term, style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 18.sp))
             }
         }
     }

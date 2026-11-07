@@ -15,7 +15,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
+import io.github.draumaz.lexeme.R
 
 // Fallback for devices without dynamic color: ink-blue on paper.
 private val LightColors = lightColorScheme(
@@ -89,17 +95,66 @@ private val DarkColors = darkColorScheme(
 /** Whether the active scheme is dark; images that need inverting read this. */
 val LocalDarkTheme = staticCompositionLocalOf { false }
 
-/** Dictionary-style serif for headwords and page titles; everything else stays in the system sans. */
-val Serif = FontFamily.Serif
+/**
+ * Google Sans Flex, bundled as one variable font: every weight from Thin to Black, with real
+ * italics from its slant axis rather than a synthesized skew. It covers Latin only; Greek,
+ * Cyrillic, CJK and IPA fall back to the system fonts glyph by glyph.
+ */
+val GoogleSansFlex = FontFamily(
+    (100..900 step 100).flatMap { w ->
+        listOf(false, true).map { italic ->
+            Font(
+                R.font.google_sans_flex,
+                FontWeight(w),
+                if (italic) FontStyle.Italic else FontStyle.Normal,
+                variationSettings = FontVariation.Settings(
+                    FontVariation.weight(w),
+                    FontVariation.slant(if (italic) -10f else 0f),
+                ),
+            )
+        }
+    }
+)
+
+/** The "Lexeme" wordmark alone keeps the bookish serif: Noto Serif Light, subset to just the letters it uses. */
+val Wordmark = FontFamily(
+    Font(
+        R.font.noto_serif_wordmark,
+        FontWeight.Light,
+        variationSettings = FontVariation.Settings(FontVariation.weight(300)),
+    )
+)
+
+private fun Typography.withFamily(family: FontFamily): Typography {
+    fun TextStyle.f() = copy(fontFamily = family)
+    return Typography(
+        displayLarge = displayLarge.f(), displayMedium = displayMedium.f(), displaySmall = displaySmall.f(),
+        headlineLarge = headlineLarge.f(), headlineMedium = headlineMedium.f(), headlineSmall = headlineSmall.f(),
+        titleLarge = titleLarge.f(), titleMedium = titleMedium.f(), titleSmall = titleSmall.f(),
+        bodyLarge = bodyLarge.f(), bodyMedium = bodyMedium.f(), bodySmall = bodySmall.f(),
+        labelLarge = labelLarge.f(), labelMedium = labelMedium.f(), labelSmall = labelSmall.f(),
+        displayLargeEmphasized = displayLargeEmphasized.f(), displayMediumEmphasized = displayMediumEmphasized.f(),
+        displaySmallEmphasized = displaySmallEmphasized.f(), headlineLargeEmphasized = headlineLargeEmphasized.f(),
+        headlineMediumEmphasized = headlineMediumEmphasized.f(), headlineSmallEmphasized = headlineSmallEmphasized.f(),
+        titleLargeEmphasized = titleLargeEmphasized.f(), titleMediumEmphasized = titleMediumEmphasized.f(),
+        titleSmallEmphasized = titleSmallEmphasized.f(), bodyLargeEmphasized = bodyLargeEmphasized.f(),
+        bodyMediumEmphasized = bodyMediumEmphasized.f(), bodySmallEmphasized = bodySmallEmphasized.f(),
+        labelLargeEmphasized = labelLargeEmphasized.f(), labelMediumEmphasized = labelMediumEmphasized.f(),
+        labelSmallEmphasized = labelSmallEmphasized.f(),
+    )
+}
+
+private val AppTypography = Typography().withFamily(GoogleSansFlex)
 
 @Composable
 fun LexemeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     val scheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         darkTheme -> DarkColors
         else -> LightColors
@@ -108,7 +163,7 @@ fun LexemeTheme(
         MaterialExpressiveTheme(
             colorScheme = scheme,
             motionScheme = MotionScheme.expressive(),
-            typography = Typography(),
+            typography = AppTypography,
             content = content,
         )
     }

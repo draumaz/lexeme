@@ -5,9 +5,16 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import android.graphics.Color
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
 import androidx.activity.viewModels
 import androidx.core.net.toUri
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.draumaz.lexeme.data.ThemeMode
 import io.github.draumaz.lexeme.ui.LexemeRoot
 import io.github.draumaz.lexeme.ui.LexemeViewModel
 import io.github.draumaz.lexeme.ui.theme.LexemeTheme
@@ -20,9 +27,24 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handle(intent)
+        val settings = (application as LexemeApp).settings
         setContent {
-            LexemeTheme {
-                LexemeRoot(vm, openExternal = ::openExternal, share = ::share)
+            val dynamicColor by settings.dynamicColor.collectAsStateWithLifecycle()
+            val themeMode by settings.themeMode.collectAsStateWithLifecycle()
+            val dark = when (themeMode) {
+                ThemeMode.System -> isSystemInDarkTheme()
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+            // Forced light or dark has to reach the system bar icons too.
+            DisposableEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT)
+                else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose { }
+            }
+            LexemeTheme(darkTheme = dark, dynamicColor = dynamicColor) {
+                LexemeRoot(vm, settings, openExternal = ::openExternal, share = ::share)
             }
         }
     }

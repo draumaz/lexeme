@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -20,6 +21,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,6 +44,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.TipsAndUpdates
 import androidx.compose.material3.Button
@@ -58,13 +66,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
 import io.github.draumaz.lexeme.ui.components.MorphShape
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
-import io.github.draumaz.lexeme.ui.theme.Serif
+import io.github.draumaz.lexeme.ui.theme.Wordmark
 import kotlinx.coroutines.launch
 
 private val Samples = listOf("serendipity", "water", "Hund", "水", "книга", "amour", "saudade", "猫")
@@ -73,42 +84,40 @@ private val Samples = listOf("serendipity", "water", "Hund", "水", "книга"
 fun HomeScreen(
     recent: List<String>,
     randomBusy: Boolean,
-    contentPadding: PaddingValues,
     onOpen: (String) -> Unit,
     onRandom: () -> Unit,
     onClearHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val seen = remember { HashSet<Any>() }
+    // No search bar up top here, so the content centres in the space above the search button.
+    val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
     Column(
         Modifier
-            .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(horizontal = 20.dp),
+            .heightIn(min = maxHeight)
+            .fillMaxWidth()
+            .padding(top = top + 24.dp, bottom = bottom + 124.dp)
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Spacer(Modifier.height(24.dp))
         HeroMark(Modifier.bouncyEnter("hero", seen, 0))
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
         Text(
             "Lexeme",
-            style = MaterialTheme.typography.displayMediumEmphasized.copy(fontFamily = Serif),
+            style = MaterialTheme.typography.displayMedium.copy(fontFamily = Wordmark, fontWeight = FontWeight.Light),
             modifier = Modifier.bouncyEnter("title", seen, 1),
         )
-        Text(
-            "Every word, in every language, from Wiktionary.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp).bouncyEnter("subtitle", seen, 2),
-        )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
         val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
         Button(
             onClick = onRandom,
             shapes = ButtonDefaults.shapes(),
             contentPadding = ButtonDefaults.MediumContentPadding,
-            modifier = Modifier.height(ButtonDefaults.MediumContainerHeight).bouncyEnter("random", seen, 3).testTag("random_button"),
+            modifier = Modifier.height(ButtonDefaults.MediumContainerHeight).bouncyEnter("random", seen, 2).testTag("random_button"),
         ) {
             AnimatedContent(
                 randomBusy,
@@ -123,7 +132,7 @@ fun HomeScreen(
             Spacer(Modifier.width(10.dp))
             Text("Surprise me", style = MaterialTheme.typography.titleMedium)
         }
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(36.dp))
 
         if (recent.isNotEmpty()) {
             SectionLabel(Icons.Rounded.History, "Recent", Modifier.bouncyEnter("recentLabel", seen, 4)) {
@@ -134,16 +143,23 @@ fun HomeScreen(
             SectionLabel(Icons.Rounded.TipsAndUpdates, "Try", Modifier.bouncyEnter("tryLabel", seen, 4)) {}
             WordChips(Samples, seen, prefix = "try", onOpen = onOpen)
         }
-        Spacer(Modifier.height(48.dp))
+    }
+    SettingsButton(
+        onClick = onOpenSettings,
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(top = top + 12.dp, end = 20.dp),
+    )
     }
 }
 
 @Composable
 private fun SectionLabel(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, modifier: Modifier, trailing: @Composable () -> Unit) {
-    Row(modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(10.dp))
-        Text(text, style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
+        Text(text, style = MaterialTheme.typography.titleMediumEmphasized)
+        Spacer(Modifier.width(4.dp))
         trailing()
     }
 }
@@ -153,7 +169,7 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
     val haptics = LocalHapticFeedback.current
     FlowRow(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         words.forEachIndexed { index, word ->
@@ -174,7 +190,7 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
             ) {
                 Text(
                     word,
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = Serif),
+                    style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                 )
             }
@@ -215,7 +231,7 @@ private fun HeroMark(modifier: Modifier = Modifier) {
 
     Box(
         modifier
-            .size(156.dp)
+            .size(140.dp)
             .graphicsLayer { scaleX = squish.value; scaleY = squish.value }
             .clickable(interactionSource = null, indication = null) {
                 haptics.performHapticFeedback(HapticFeedbackType.Confirm)
@@ -234,5 +250,42 @@ private fun HeroMark(modifier: Modifier = Modifier) {
                 .background(colors.primaryContainer, shape)
         )
         Icon(Icons.Rounded.AutoStories, null, Modifier.size(68.dp), tint = colors.onPrimaryContainer)
+    }
+}
+
+/**
+ * The landing page's search button, after Nickel's add button: a slowly turning scalloped
+ * cookie that squishes when pressed and kicks round with a spring when tapped.
+ */
+@Composable
+fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val idle = rememberInfiniteTransition(label = "fabSpin")
+    val idleRotation by idle.animateFloat(0f, 360f, infiniteRepeatable(tween(14_000, easing = LinearEasing)), label = "fabIdle")
+    val kick = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val colors = MaterialTheme.colorScheme
+    val shape = remember { MorphShape(Morph(MaterialShapes.Cookie12Sided, MaterialShapes.Cookie12Sided), 0f) }
+    Box(
+        modifier
+            .size(84.dp)
+            .pressScale(interaction, 0.88f)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                scope.launch { kick.animateTo(kick.value + 120f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
+                onClick()
+            }
+            .semantics { contentDescription = "Search" }
+            .testTag("home_search"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer { rotationZ = idleRotation + kick.value }
+                .background(colors.primaryContainer.copy(alpha = 0.88f), shape)
+        )
+        Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.onPrimaryContainer, modifier = Modifier.size(38.dp))
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.automirrored.rounded.KeyboardReturn
 import androidx.compose.material.icons.rounded.NorthWest
+import androidx.compose.material.icons.rounded.SouthWest
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +76,8 @@ fun SearchBar(
     suggestions: Suggestions,
     recent: List<String>,
     modifier: Modifier = Modifier,
+    /** Docked at the bottom (the landing page): suggestions open upward, best match nearest the field. */
+    fromBottom: Boolean = false,
 ) {
     val colors = MaterialTheme.colorScheme
     val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.Dp>()
@@ -92,7 +96,8 @@ fun SearchBar(
     val picked = if (showingRecent) null else suggestions.pickFor(query)
 
     val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    @Composable
+    fun Field() {
         Surface(
             shape = RoundedCornerShape(corner),
             color = container,
@@ -165,10 +170,17 @@ fun SearchBar(
             }
         }
 
+    }
+
+    @Composable
+    fun ColumnScope.Dropdown() {
+        val edge = if (fromBottom) Alignment.Bottom else Alignment.Top
         AnimatedVisibility(
             visible = focused && items.isNotEmpty(),
-            enter = expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow), expandFrom = Alignment.Top) + fadeIn(),
-            exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium), shrinkTowards = Alignment.Top) + fadeOut(),
+            enter = expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow), expandFrom = edge) + fadeIn(),
+            exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium), shrinkTowards = edge) + fadeOut(),
+            // Docked at the bottom, the list takes whatever room the keyboard leaves above the field.
+            modifier = if (fromBottom) Modifier.weight(1f, fill = false) else Modifier,
         ) {
             val seen = remember(showingRecent) { HashSet<Any>() }
             Surface(
@@ -177,8 +189,14 @@ fun SearchBar(
                 modifier = Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(28.dp)).testTag("suggestions"),
             ) {
                 // Scrolls when the keyboard leaves less room than the list needs.
-                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-                    items.forEachIndexed { index, item ->
+                Column(
+                    Modifier
+                        .then(if (fromBottom) Modifier else Modifier.heightIn(max = 420.dp))
+                        .verticalScroll(rememberScrollState(), reverseScrolling = fromBottom)
+                        .padding(vertical = 8.dp)
+                ) {
+                    val ordered = if (fromBottom) items.withIndex().reversed() else items.withIndex().toList()
+                    ordered.forEach { (index, item) ->
                         val highlighted = item == picked
                         val rowColor by animateColorAsState(
                             if (highlighted) colors.secondaryContainer else colors.surfaceContainerHigh,
@@ -216,13 +234,23 @@ fun SearchBar(
                                     modifier = Modifier.weight(1f),
                                 )
                                 IconButton(onClick = { onQueryChange(item) }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.NorthWest, contentDescription = "Fill in $item", tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                                    Icon(if (fromBottom) Icons.Rounded.SouthWest else Icons.Rounded.NorthWest, contentDescription = "Fill in $item", tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp, if (fromBottom) Alignment.Bottom else Alignment.Top)) {
+        if (fromBottom) {
+            Dropdown()
+            Field()
+        } else {
+            Field()
+            Dropdown()
         }
     }
 }
