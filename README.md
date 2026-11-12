@@ -20,7 +20,9 @@ language on the page.
     <td>
       <h3>Inflection tables</h3>
       Declension and conjugation tables are rendered as grids with their original row and
-      column spans, header cells and footnotes. Tables wider than the screen scroll horizontally.
+      column spans, header cells and footnotes. Wide tables narrow their columns and, if needed,
+      scale down to fit the screen; the widest scroll sideways, with faded edges and a scroll bar
+      showing there's more.
     </td>
   </tr>
   <tr>
@@ -60,8 +62,9 @@ Entries also include:
 - The search field opens above the keyboard. Suggestions appear as you type, and Enter opens the
   highlighted suggestion.
 - The search button sits at the bottom of every screen and expands into the search field when tapped.
-  On entry pages it is flanked by home and share, with a button
-  above it that jumps up one language section. These buttons hide while scrolling down and reappear when scrolling up.
+  On entry pages it is flanked by home and share, and once you are a screen or more down the page
+  a button above it jumps up one language section. These buttons hide while scrolling down and
+  reappear when scrolling up.
 - Back navigation supports the predictive back gesture and restores the previous scroll position.
 - The app adds "Look up in Lexeme" to the text selection menu and opens en.wiktionary.org links.
 
