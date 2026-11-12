@@ -5,7 +5,11 @@ plugins {
 
 android {
     namespace = "io.github.draumaz.lexeme"
-    compileSdk = 37
+    // 37.2 for RenderNode.setBackdropRenderEffect (the search scallop's frosted glass);
+    // minSdk stays put, and older devices fall back to the tonal fill at runtime.
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         applicationId = "xyz.draumaz.lexeme"

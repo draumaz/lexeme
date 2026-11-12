@@ -52,6 +52,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.toShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -74,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
 import io.github.draumaz.lexeme.ui.components.morphBackground
+import io.github.draumaz.lexeme.ui.components.glass
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
 import io.github.draumaz.lexeme.ui.theme.Wordmark
@@ -261,6 +264,7 @@ private fun HeroMark(modifier: Modifier = Modifier) {
  * The landing page's search button, after Nickel's add button: a slowly turning scalloped
  * cookie that squishes when pressed and kicks round with a spring when tapped.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val idle = rememberInfiniteTransition(label = "fabSpin")
@@ -270,10 +274,10 @@ fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val colors = MaterialTheme.colorScheme
-    val shape = remember { Morph(MaterialShapes.Cookie12Sided, MaterialShapes.Cookie12Sided) }
+    val shape = MaterialShapes.Cookie12Sided.toShape()
     Box(
         modifier
-            .size(84.dp)
+            .size(SearchFabSize)
             .pressScale(interaction, 0.88f)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
                 haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -287,12 +291,31 @@ fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .matchParentSize()
-                .morphBackground(
-                    colors.primaryContainer.copy(alpha = 0.88f),
-                    morph = { shape },
-                    rotation = { idleRotation + kick.value },
+                .graphicsLayer { rotationZ = idleRotation + kick.value }
+                // Frosted glass, as in Nickel: mostly blur, with a wash of the (dynamic)
+                // primaryContainer so the scallop's edge still reads over plain text. Before
+                // Android 17 QPR2 it keeps the see-through tonal fill it always had.
+                .glass(
+                    shape = shape,
+                    tint = colors.primaryContainer.copy(alpha = SearchFabGlassTint),
+                    fallback = colors.primaryContainer.copy(alpha = 0.88f),
                 )
         )
-        Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.onPrimaryContainer, modifier = Modifier.size(38.dp))
+        Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.onPrimaryContainer, modifier = Modifier.size(SearchFabSize * SearchFabIconScale))
     }
 }
+
+/**
+ * The search scallop's size: Nickel's add button exactly (Expressive's medium FAB), which also
+ * sits where Nickel's Scaffold puts its FAB, centred 16dp above the navigation bar.
+ */
+val SearchFabSize = 80.dp
+
+/** The magnifier as a fraction of [SearchFabSize], as Nickel's plus is of its button. */
+private const val SearchFabIconScale = 0.44f
+
+/**
+ * How much primaryContainer the search scallop's glass keeps: Nickel's add-button strength,
+ * so the screen's main action holds its own over the page scrolling beneath it.
+ */
+private const val SearchFabGlassTint = 0.5f

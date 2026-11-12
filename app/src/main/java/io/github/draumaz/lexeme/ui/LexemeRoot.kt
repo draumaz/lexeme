@@ -95,6 +95,9 @@ import io.github.draumaz.lexeme.ui.blocks.AudioController
 import io.github.draumaz.lexeme.ui.blocks.LocalAudio
 import io.github.draumaz.lexeme.ui.blocks.LocalLinkHandler
 import io.github.draumaz.lexeme.ui.components.LocalScrollClaim
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Color
+import io.github.draumaz.lexeme.ui.components.glass
 import io.github.draumaz.lexeme.ui.components.ScrollClaim
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -410,9 +413,14 @@ fun LexemeRoot(
                             scope.launch { listStates[id]?.animateScrollToItem(0) }
                         },
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.86f),
+                        // Frosted like the scallop and the pills (see toolbarGlass).
+                        color = Color.Transparent,
                         contentColor = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 10.dp).size(48.dp).testTag("toolbar_top"),
+                        modifier = Modifier
+                            .padding(bottom = 10.dp)
+                            .size(48.dp)
+                            .toolbarGlass(CircleShape)
+                            .testTag("toolbar_top"),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(Icons.Rounded.ArrowUpward, contentDescription = "Back to top")
@@ -443,7 +451,7 @@ fun LexemeRoot(
                                 }
                             }
                         }
-                        Spacer(Modifier.width(84.dp + 16.dp))
+                        Spacer(Modifier.width(SearchFabSize + 16.dp))
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                             ToolbarPill(pillsShown, towardEnd = false, tag = "toolbar_end") {
                                 IconButton(onClick = { share(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_share")) {
@@ -464,7 +472,8 @@ fun LexemeRoot(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 112.dp),
+                    // Just clear of the scallop: 16dp below it, its height, and a 12dp gap.
+                    .padding(bottom = 16.dp + SearchFabSize + 12.dp),
             )
 
             // Settings slide in over everything, springing a little on arrival.
@@ -511,17 +520,37 @@ private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, conte
             slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { if (towardEnd) it / 2 else -it / 2 } +
             fadeOut(),
     ) {
+        val shape = RoundedCornerShape(28.dp)
         Surface(
-            shape = RoundedCornerShape(28.dp),
-            // See-through like the scallop, so the page shows behind; no shadow to darken it.
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.86f),
+            shape = shape,
+            // Frosted glass like the scallop, so the page shows behind blurred; no shadow to
+            // darken it. The glass draws the fill, so the Surface's own is left clear.
+            color = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.testTag(tag),
+            modifier = Modifier.toolbarGlass(shape).testTag(tag),
         ) {
             Row(Modifier.height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
         }
     }
 }
+
+/**
+ * The glass for the controls around the search scallop (the pills and back to top). They keep
+ * their surfaceContainerHighest tone, more heavily than the scallop keeps its tint: their icons
+ * are plain onSurface, so the page behind should glow through rather than compete. Before
+ * Android 17 QPR2 they keep the see-through fill they always had.
+ */
+@Composable
+private fun Modifier.toolbarGlass(shape: Shape): Modifier {
+    val container = MaterialTheme.colorScheme.surfaceContainerHighest
+    return glass(
+        shape = shape,
+        tint = container.copy(alpha = ToolbarGlassTint),
+        fallback = container.copy(alpha = 0.86f),
+    )
+}
+
+private const val ToolbarGlassTint = 0.6f
 
 private const val SearchMorphKey = "searchMorph"
 
