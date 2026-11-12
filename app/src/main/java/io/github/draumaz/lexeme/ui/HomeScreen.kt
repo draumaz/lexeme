@@ -94,6 +94,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
 ) {
     val seen = remember { HashSet<Any>() }
+    val haptics = LocalHapticFeedback.current
     // No search bar up top here, so the content centres in the space above the search button.
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -118,7 +119,10 @@ fun HomeScreen(
         Spacer(Modifier.height(16.dp))
         val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
         Button(
-            onClick = onRandom,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                onRandom()
+            },
             shapes = ButtonDefaults.shapes(),
             contentPadding = ButtonDefaults.MediumContentPadding,
             modifier = Modifier.height(ButtonDefaults.MediumContainerHeight).bouncyEnter("random", seen, 2).testTag("random_button"),
