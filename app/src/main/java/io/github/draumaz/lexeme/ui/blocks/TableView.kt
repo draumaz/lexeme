@@ -1,6 +1,34 @@
 package io.github.draumaz.lexeme.ui.blocks
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.math.ceil
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,14 +91,24 @@ fun TableView(table: Block.Table) {
                 RichTextView(caption, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
             }
         }
-        // Wide tables scroll sideways inside the card rather than squashing their columns.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .horizontalScroll(rememberScrollState())
-        ) {
-            GridLayout(grid, table.inflection)
+        // Tables shrink to fit the screen: columns first, then the whole grid down to MIN_SCALE.
+        // Past that they scroll sideways, with faded edges and a track that show there's more.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val available = constraints.maxWidth
+            val scroll = rememberScrollState()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .scrollFades(scroll)
+                        .clip(RoundedCornerShape(18.dp))
+                        .horizontalScroll(scroll)
+                        .testTag("table_grid")
+                ) {
+                    GridLayout(grid, table.inflection, available)
+                }
+                if (scroll.maxValue > 0) ScrollTrack(scroll, available)
+            }
         }
         if (table.rows.size > rows.size) {
             OutlinedButton(onClick = { showAll = true }, shapes = ButtonDefaults.shapes()) {
@@ -86,8 +124,11 @@ fun TableView(table: Block.Table) {
     }
 }
 
+/** Smallest the grid is scaled to before it scrolls instead; below this text gets hard to read. */
+private const val MIN_SCALE = 0.72f
+
 @Composable
-private fun GridLayout(grid: TableGrid, inflection: Boolean) {
+private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
     Layout(content = {
         grid.cells.forEach { CellBox(it, grid, inflection) }
     }) { measurables, _ ->
@@ -95,20 +136,50 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean) {
         val maxCell = 260.dp.roundToPx()
         val minCell = 36.dp.roundToPx()
         val n = grid.columns
-        val cols = IntArray(n)
+        val gaps = gap * (n - 1).coerceAtLeast(0)
         val preferred = IntArray(measurables.size) {
             measurables[it].maxIntrinsicWidth(Constraints.Infinity).coerceAtMost(maxCell * grid.cells[it].colspan)
         }
-        grid.cells.forEachIndexed { i, c ->
-            if (c.colspan == 1) cols[c.col] = maxOf(cols[c.col], preferred[i].coerceIn(minCell, maxCell))
+        // A column can't go narrower than its longest unbreakable word.
+        val narrowest = IntArray(measurables.size) {
+            measurables[it].minIntrinsicWidth(Constraints.Infinity).coerceAtMost(preferred[it])
         }
-        for (k in 0 until n) if (cols[k] == 0) cols[k] = minCell
+        val pref = IntArray(n)
+        val min = IntArray(n)
+        grid.cells.forEachIndexed { i, c ->
+            if (c.colspan == 1) {
+                pref[c.col] = maxOf(pref[c.col], preferred[i].coerceIn(minCell, maxCell))
+                min[c.col] = maxOf(min[c.col], narrowest[i].coerceIn(minCell, maxCell))
+            }
+        }
+        for (k in 0 until n) {
+            if (pref[k] == 0) pref[k] = minCell
+            if (min[k] == 0) min[k] = minCell
+            min[k] = min[k].coerceAtMost(pref[k])
+        }
+        val prefTotal = pref.sum() + gaps
+        val minTotal = min.sum() + gaps
+        val limit = if (available in 1 until Constraints.Infinity) available else Int.MAX_VALUE
+        // Scale only when even the narrowest columns overflow, and never below MIN_SCALE.
+        val scale = if (minTotal <= limit) 1f else maxOf(limit.toFloat() / minTotal, MIN_SCALE)
+        val target = if (limit == Int.MAX_VALUE) Int.MAX_VALUE else (limit / scale).toInt()
+        val cols = when {
+            prefTotal <= target -> pref
+            minTotal >= target -> min
+            else -> {
+                // Give each column its minimum, then share what's left by how much more it wanted.
+                val spare = (target - minTotal).toFloat()
+                val want = (prefTotal - minTotal).toFloat()
+                IntArray(n) { min[it] + ((pref[it] - min[it]) * spare / want).toInt() }
+            }
+        }
         // Spanning cells widen their columns only if they don't fit what the others need.
         grid.cells.forEachIndexed { i, c ->
             if (c.colspan > 1) {
                 val range = c.col until minOf(c.col + c.colspan, n)
                 val have = range.sumOf { cols[it] } + gap * (range.count() - 1)
-                val extra = preferred[i] - have
+                val need = if (minTotal >= target) narrowest[i] else minOf(preferred[i], maxOf(narrowest[i], have))
+                val extra = need - have
                 if (extra > 0) range.forEach { cols[it] += extra / range.count() + 1 }
             }
         }
@@ -134,9 +205,107 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean) {
             val c = grid.cells[i]
             m.measure(Constraints.fixed(width(c).coerceAtLeast(0), height(c).coerceAtLeast(0)))
         }
-        layout((x[n] - gap).coerceAtLeast(0), (y[grid.rows] - gap).coerceAtLeast(0)) {
-            placeables.forEachIndexed { i, p -> p.place(x[grid.cells[i].col], y[grid.cells[i].row]) }
+        val w = (x[n] - gap).coerceAtLeast(0)
+        val h = (y[grid.rows] - gap).coerceAtLeast(0)
+        layout(ceil(w * scale).toInt(), ceil(h * scale).toInt()) {
+            placeables.forEachIndexed { i, p ->
+                val c = grid.cells[i]
+                if (scale == 1f) {
+                    p.place(x[c.col], y[c.row])
+                } else {
+                    p.placeWithLayer((x[c.col] * scale).roundToInt(), (y[c.row] * scale).roundToInt()) {
+                        scaleX = scale
+                        scaleY = scale
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    }
+                }
+            }
         }
+    }
+}
+
+/** Fades whichever edge still has table beyond it. */
+private fun Modifier.scrollFades(scroll: ScrollState): Modifier = composed {
+    val start by animateFloatAsState(if (scroll.canScrollBackward) 1f else 0f, label = "fadeStart")
+    val end by animateFloatAsState(if (scroll.canScrollForward) 1f else 0f, label = "fadeEnd")
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val fade = with(LocalDensity.current) { 40.dp.toPx() }
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val left = if (rtl) end else start
+            val right = if (rtl) start else end
+            if (left > 0f) drawRect(
+                Brush.horizontalGradient(listOf(Color.Black.copy(alpha = left), Color.Transparent), startX = 0f, endX = fade),
+                size = Size(fade, size.height),
+                blendMode = BlendMode.DstOut,
+            )
+            if (right > 0f) drawRect(
+                Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = right)), startX = size.width - fade, endX = size.width),
+                topLeft = Offset(size.width - fade, 0f),
+                size = Size(fade, size.height),
+                blendMode = BlendMode.DstOut,
+            )
+        }
+}
+
+/** A track under scrolling tables: chevrons at the ends that have more, and a thumb for where you are. */
+@Composable
+private fun ScrollTrack(scroll: ScrollState, viewport: Int) {
+    val colors = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val startAlpha by animateFloatAsState(if (scroll.canScrollBackward) 1f else 0.3f, label = "chevStart")
+    val endAlpha by animateFloatAsState(if (scroll.canScrollForward) 1f else 0.3f, label = "chevEnd")
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().testTag("table_scroll_track")) {
+        Icon(
+            Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+            contentDescription = "Scroll table back",
+            tint = colors.primary,
+            modifier = Modifier
+                .size(28.dp)
+                .alpha(startAlpha)
+                .clip(CircleShape)
+                .clickable(enabled = scroll.canScrollBackward) {
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    scope.launch { scroll.animateScrollTo((scroll.value - viewport * 3 / 4).coerceAtLeast(0)) }
+                }
+                .padding(2.dp),
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .height(6.dp)
+                .clip(CircleShape)
+                .background(colors.surfaceContainerHighest)
+                .drawWithContent {
+                    val content = viewport + scroll.maxValue
+                    val thumb = (size.width * viewport / content).coerceAtLeast(12.dp.toPx())
+                    val travel = size.width - thumb
+                    val fraction = if (scroll.maxValue == 0) 0f else scroll.value.toFloat() / scroll.maxValue
+                    val offset = if (layoutDirection == LayoutDirection.Rtl) travel * (1 - fraction) else travel * fraction
+                    drawRoundRect(
+                        colors.primary,
+                        topLeft = Offset(offset, 0f),
+                        size = Size(thumb, size.height),
+                        cornerRadius = CornerRadius(size.height / 2),
+                    )
+                },
+        )
+        Icon(
+            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+            contentDescription = "Scroll table forward",
+            tint = colors.primary,
+            modifier = Modifier
+                .size(28.dp)
+                .alpha(endAlpha)
+                .clip(CircleShape)
+                .clickable(enabled = scroll.canScrollForward) {
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    scope.launch { scroll.animateScrollTo((scroll.value + viewport * 3 / 4).coerceAtMost(scroll.maxValue)) }
+                }
+                .padding(2.dp),
+        )
     }
 }
 

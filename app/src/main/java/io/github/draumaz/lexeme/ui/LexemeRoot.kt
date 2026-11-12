@@ -1,5 +1,19 @@
 package io.github.draumaz.lexeme.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import io.github.draumaz.lexeme.ui.components.pressScale
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
@@ -35,10 +49,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -50,6 +62,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +81,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
@@ -82,6 +96,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -337,6 +352,7 @@ fun LexemeRoot(
                 focusRequester = requester,
                 canGoBack = pages.isNotEmpty(),
                 onBack = {
+                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                     if (focused) focusManager.clearFocus() else vm.back()
                 },
                 suggestions = suggestions,
@@ -386,7 +402,7 @@ fun LexemeRoot(
             }
 
             // One rotating search scallop, bottom centre on every screen. On entries the actions
-            // sit in two see-through pills either side of it, and tuck into it while reading down.
+            // (home and share) sit in see-through circles either side of it, and tuck into it while reading down.
             AnimatedVisibility(
                 visible = !focused && !dockedSearch,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -398,33 +414,39 @@ fun LexemeRoot(
             ) {
                 val title = (current?.state as? PageState.Loaded)?.entry?.title ?: current?.title.orEmpty()
                 val pillsShown = current != null && toolbarExpanded
+                val pickerOffset = with(LocalDensity.current) { LanguagePickerOffset.roundToPx() }
+                // Up-one-language only once the page's top is a screen or more behind you.
+                val listState = current?.id?.let { id -> listStates.getOrPut(id) { LazyListState() } }
+                val farFromTop by remember(listState) {
+                    derivedStateOf {
+                        val s = listState ?: return@derivedStateOf false
+                        val info = s.layoutInfo
+                        val viewport = info.viewportEndOffset - info.viewportStartOffset
+                        val visible = info.visibleItemsInfo
+                        if (viewport <= 0 || visible.isEmpty()) return@derivedStateOf false
+                        // Rows above the screen aren't measured; estimate them from the ones on it.
+                        val average = visible.sumOf { it.size } / visible.size
+                        s.firstVisibleItemIndex * average + s.firstVisibleItemScrollOffset > viewport
+                    }
+                }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Back to top floats just above the scallop, so the pills either side stay two and two.
+                // Up-one-language floats just above the scallop, so home and share either side stay balanced.
                 AnimatedVisibility(
-                    visible = pillsShown,
+                    visible = pillsShown && farFromTop,
                     enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
                         slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } + fadeIn(),
                     exit = scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
                         slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 2 } + fadeOut(),
                 ) {
-                    Surface(
-                        onClick = {
-                            val id = current?.id ?: return@Surface
-                            scope.launch { listStates[id]?.animateScrollToItem(0) }
-                        },
-                        shape = CircleShape,
-                        // Frosted like the scallop and the pills (see toolbarGlass).
-                        color = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .padding(bottom = 10.dp)
-                            .size(48.dp)
-                            .toolbarGlass(CircleShape)
-                            .testTag("toolbar_top"),
+                    ScallopButton(
+                        icon = Icons.Rounded.ArrowUpward,
+                        description = "Up one language",
+                        size = 52.dp,
+                        modifier = Modifier.padding(bottom = 10.dp).testTag("toolbar_top"),
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.ArrowUpward, contentDescription = "Back to top")
-                        }
+                        val id = current?.id ?: return@ScallopButton
+                        val languageRows = (current.state as? PageState.Loaded)?.entry?.let(::languageRowIndices).orEmpty()
+                        scope.launch { listStates[id]?.scrollUpOneLanguage(languageRows, pickerOffset) }
                     }
                 }
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -436,30 +458,20 @@ fun LexemeRoot(
                             boundsTransform = SearchMorphBounds,
                         ),
                     )
-                    // Left pill ends at the scallop's left edge, right pill starts at its right edge.
+                    // Home and share sit as matching scallops the same distance either side of the scallop.
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                             ToolbarPill(pillsShown, towardEnd = true, tag = "toolbar") {
-                                IconButton(onClick = { vm.home() }, modifier = Modifier.testTag("toolbar_home")) {
-                                    Icon(Icons.Rounded.Home, contentDescription = "Home")
-                                }
-                                IconButton(onClick = vm::random, modifier = Modifier.testTag("toolbar_random")) {
-                                    Icon(Icons.Rounded.Shuffle, contentDescription = "Random word")
-                                }
+                                ScallopButton(Icons.Rounded.Home, "Home", modifier = Modifier.testTag("toolbar_home")) { vm.home() }
                             }
                         }
                         Spacer(Modifier.width(SearchFabSize + 16.dp))
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                             ToolbarPill(pillsShown, towardEnd = false, tag = "toolbar_end") {
-                                IconButton(onClick = { share(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_share")) {
-                                    Icon(Icons.Rounded.Share, contentDescription = "Share")
-                                }
-                                IconButton(onClick = { openExternal(wiktionaryUrl(title)) }, modifier = Modifier.testTag("toolbar_browser")) {
-                                    Icon(Icons.Rounded.OpenInBrowser, contentDescription = "Open on Wiktionary")
-                                }
+                                ScallopButton(Icons.Rounded.Share, "Share", modifier = Modifier.testTag("toolbar_share")) { share(wiktionaryUrl(title)) }
                             }
                         }
                     }
@@ -505,11 +517,11 @@ fun LexemeRoot(
 }
 
 /**
- * Half of the entry toolbar beside the search scallop: semi-transparent, and springing in from
+ * A button beside the search scallop, springing in from
  * (or tucking back into) the scallop's side. [towardEnd] means the scallop is on its right.
  */
 @Composable
-private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, content: @Composable RowScope.() -> Unit) {
+private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, content: @Composable () -> Unit) {
     val origin = TransformOrigin(if (towardEnd) 1f else 0f, 0.5f)
     AnimatedVisibility(
         visible = visible,
@@ -520,22 +532,55 @@ private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, conte
             slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { if (towardEnd) it / 2 else -it / 2 } +
             fadeOut(),
     ) {
-        val shape = RoundedCornerShape(28.dp)
-        Surface(
-            shape = shape,
-            // Frosted glass like the scallop, so the page shows behind blurred; no shadow to
-            // darken it. The glass draws the fill, so the Surface's own is left clear.
-            color = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.toolbarGlass(shape).testTag(tag),
-        ) {
-            Row(Modifier.height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
-        }
+        Box(Modifier.testTag(tag)) { content() }
     }
 }
 
 /**
- * The glass for the controls around the search scallop (the pills and back to top). They keep
+ * A small version of the search scallop for the controls around it: a slowly turning cookie
+ * in the same frosted glass that squishes when pressed and kicks round when tapped. It turns
+ * the other way to the search scallop, a little faster, so the group doesn't spin in lockstep.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ScallopButton(
+    icon: ImageVector,
+    description: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 60.dp,
+    onClick: () -> Unit,
+) {
+    val idle = rememberInfiniteTransition(label = "scallopSpin")
+    val idleRotation by idle.animateFloat(0f, -360f, infiniteRepeatable(tween(11_000, easing = LinearEasing)), label = "scallopIdle")
+    val kick = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val shape = MaterialShapes.Cookie9Sided.toShape()
+    Box(
+        modifier
+            .size(size)
+            .pressScale(interaction, 0.86f)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                scope.launch { kick.animateTo(kick.value - 120f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
+                onClick()
+            }
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer { rotationZ = idleRotation + kick.value }
+                .toolbarGlass(shape)
+        )
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(size * 0.42f))
+    }
+}
+
+/**
+ * The glass for the controls around the search scallop (home, share and up-one-language). They keep
  * their surfaceContainerHighest tone, more heavily than the scallop keeps its tint: their icons
  * are plain onSurface, so the page behind should glow through rather than compete. Before
  * Android 17 QPR2 they keep the see-through fill they always had.

@@ -169,6 +169,7 @@ private fun WobblingBadge(shape: RoundedPolygon, color: Color, icon: ImageVector
 @Composable
 private fun MissingView(title: String, suggestions: List<String>, contentPadding: PaddingValues, onOpen: (String) -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
     CenteredStatus(contentPadding) {
         WobblingBadge(MaterialShapes.Puffy, colors.tertiaryContainer, Icons.Rounded.SearchOff, colors.onTertiaryContainer)
         Text(
@@ -184,7 +185,10 @@ private fun MissingView(title: String, suggestions: List<String>, contentPadding
                 suggestions.forEachIndexed { i, s ->
                     val source = remember { MutableInteractionSource() }
                     Surface(
-                        onClick = { onOpen(s) },
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            onOpen(s)
+                        },
                         shape = RoundedCornerShape(14.dp),
                         color = colors.secondaryContainer,
                         interactionSource = source,
@@ -245,6 +249,29 @@ private fun rowsFor(entry: Entry): List<EntryRow> = buildList {
     }
 }
 
+/** Height of the pinned language picker; language headers scroll to just below it. */
+internal val LanguagePickerOffset = 76.dp
+
+/** List indices of each language's header, or none when there's only one language (and no picker). */
+internal fun languageRowIndices(entry: Entry): List<Int> =
+    if (entry.languages.size < 2) emptyList()
+    else rowsFor(entry).withIndex().filter { it.value is EntryRow.LanguageHeader }.map { it.index }
+
+/**
+ * Scrolls up one language: to the start of the one being read, or to the one before if already
+ * at its start. Before the first language, or on single-language pages, goes to the top.
+ */
+internal suspend fun LazyListState.scrollUpOneLanguage(languageRows: List<Int>, pickerOffset: Int) {
+    val line = pickerOffset + 8
+    val visible = layoutInfo.visibleItemsInfo
+    fun offsetOf(index: Int) = visible.firstOrNull { it.index == index }?.offset
+    val passed = languageRows.filter { h -> h < firstVisibleItemIndex || (offsetOf(h)?.let { it <= line } ?: false) }
+    val current = passed.lastOrNull()
+    val atItsStart = current != null && (offsetOf(current)?.let { it >= line - 24 } ?: false)
+    val target = if (atItsStart) passed.getOrNull(passed.size - 2) else current
+    if (target == null) animateScrollToItem(0) else animateScrollToItem(target, -pickerOffset)
+}
+
 /** `German`, `German:_dog`, `Etymology_2`... the language part of a Wiktionary anchor. */
 private fun languageIndexFor(entry: Entry, fragment: String): Int {
     val lang = fragment.substringBefore(":_").substringBefore(':')
@@ -264,7 +291,7 @@ private fun EntryView(
     val languageRowSet = remember(languageRows) { languageRows.toHashSet() }
     // When this entry appeared: only rows composed right away stagger in.
     val shownAt = remember(entry) { SystemClock.uptimeMillis() }
-    val stickyOffset = with(LocalDensity.current) { 76.dp.roundToPx() }
+    val stickyOffset = with(LocalDensity.current) { LanguagePickerOffset.roundToPx() }
     val scope = rememberCoroutineScope()
     val currentLanguage by remember(languageRows) {
         derivedStateOf {

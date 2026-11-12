@@ -122,7 +122,10 @@ fun SettingsScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(
-                onClick = onBack,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                    onBack()
+                },
                 shapes = IconButtonDefaults.shapes(),
                 modifier = Modifier.testTag("settings_back"),
             ) {
@@ -217,7 +220,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(20.dp))
         SectionLabel("About", Modifier.bouncyEnter("about", seen, 5))
-        SegmentSurface(first = true, last = false, onClick = { openExternal(AUTHOR_URL) }, modifier = Modifier.bouncyEnter("author", seen, 6).testTag("about_author")) {
+        SegmentSurface(first = true, last = false, onClick = { haptics.performHapticFeedback(HapticFeedbackType.ContextClick); openExternal(AUTHOR_URL) }, modifier = Modifier.bouncyEnter("author", seen, 6).testTag("about_author")) {
             RowContent(
                 leading = {
                     Image(
@@ -238,7 +241,7 @@ fun SettingsScreen(
             title = "Lexeme ${BuildConfig.VERSION_NAME}",
             subtitle = "Source code on GitHub",
             first = false, last = false,
-            onClick = { openExternal(REPO_URL) },
+            onClick = { haptics.performHapticFeedback(HapticFeedbackType.ContextClick); openExternal(REPO_URL) },
             modifier = Modifier.bouncyEnter("repo", seen, 7).testTag("about_repo"),
         ) { OpenIcon() }
         SettingRow(
@@ -247,7 +250,7 @@ fun SettingsScreen(
             title = "Wiktionary",
             subtitle = "Entries are from Wiktionary, under CC BY-SA 4.0",
             first = false, last = true,
-            onClick = { openExternal(WIKTIONARY_URL) },
+            onClick = { haptics.performHapticFeedback(HapticFeedbackType.ContextClick); openExternal(WIKTIONARY_URL) },
             modifier = Modifier.bouncyEnter("wiktionary", seen, 8).testTag("about_wiktionary"),
         ) { OpenIcon() }
 
