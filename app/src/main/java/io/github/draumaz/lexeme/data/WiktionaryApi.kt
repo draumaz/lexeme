@@ -1,9 +1,11 @@
 package io.github.draumaz.lexeme.data
 
+import io.github.draumaz.lexeme.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -11,8 +13,13 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Wikimedia asks API clients to identify themselves; anonymous user agents get throttled or blocked. */
-const val USER_AGENT = "Lexeme/1.0 (Android Wiktionary reader app)"
+/**
+ * Wikimedia's User-Agent policy asks clients to name themselves and give contact info. Without
+ * the contact URL, its edge treats OkHttp traffic as an anonymous bot and some IPs get HTTP 403
+ * ("Too many requests").
+ */
+val USER_AGENT =
+    "Lexeme/${BuildConfig.VERSION_NAME} (https://github.com/draumaz/lexeme) okhttp/${OkHttp.VERSION}"
 
 sealed interface LookupResult {
     data class Found(val entry: Entry) : LookupResult
