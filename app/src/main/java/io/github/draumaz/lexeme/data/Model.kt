@@ -28,7 +28,8 @@ data class Section(
     val level: Int,
     val blocks: List<Block>,
 ) {
-    val kind: SectionKind get() = SectionKind.of(title)
+    /** Worked out once: the UI asks for it on every recomposition of the page. */
+    val kind: SectionKind = SectionKind.of(title)
 }
 
 enum class SectionKind {
@@ -47,8 +48,10 @@ enum class SectionKind {
             "definitions", "kanji", "hanja", "han character", "logogram", "combining form",
         )
 
+        private val trailingNumber = Regex("\\s+\\d+$")
+
         fun of(title: String): SectionKind {
-            val t = title.lowercase().trim().replace(Regex("\\s+\\d+$"), "")
+            val t = title.lowercase().trim().replace(trailingNumber, "")
             return when {
                 t.startsWith("etymology") || t == "glyph origin" -> ETYMOLOGY
                 t.startsWith("pronunciation") -> PRONUNCIATION
@@ -131,8 +134,13 @@ data class Image(
         get() {
             val file = runCatching { java.net.URLDecoder.decode(url.substringAfterLast('/'), "UTF-8") }
                 .getOrDefault(url.substringAfterLast('/'))
-            return file.substringBeforeLast('.').replace(Regex("^\\d+px-"), "").replace(Regex("[_-]+"), " ").trim()
+            return file.substringBeforeLast('.').replace(ThumbPrefix, "").replace(Separators, " ").trim()
         }
+
+    private companion object {
+        val ThumbPrefix = Regex("^\\d+px-")
+        val Separators = Regex("[_-]+")
+    }
 }
 
 data class EtymologyNode(val language: String, val term: RichText, val relation: String?)

@@ -2,7 +2,6 @@ package io.github.draumaz.lexeme.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -19,6 +18,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.MotionDurationScale
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -289,13 +296,38 @@ class ScrollClaim {
 
 val LocalScrollClaim = androidx.compose.runtime.staticCompositionLocalOf { ScrollClaim() }
 
-/** A slow, endless turn in degrees, for badges that idle by rotating. */
+/**
+ * True while the page is scrolling. Idle spins hold still meanwhile: each one would otherwise
+ * redraw every frame, and the scroll needs that frame time more than a badge needs to turn.
+ */
+val LocalSpinPaused = staticCompositionLocalOf<State<Boolean>> { mutableStateOf(false) }
+
+/**
+ * A slow, endless turn in degrees for badges that idle by rotating, one full turn every
+ * [periodMillis]; negative turns the other way. Unless it's [pausable] = false (a busy
+ * indicator), it stops where it is while [LocalSpinPaused] is set and requests no frames at
+ * all, then carries on from the same angle. It honours the system animation scale, and
+ * doesn't turn at all with animations off.
+ */
 @Composable
-fun rememberSpin(periodMillis: Int = 18_000): androidx.compose.runtime.State<Float> =
-    androidx.compose.animation.core.rememberInfiniteTransition(label = "spin").animateFloat(
-        0f, 360f,
-        androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(periodMillis, easing = androidx.compose.animation.core.LinearEasing)
-        ),
-        label = "spinAngle",
-    )
+fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Float> {
+    val paused = LocalSpinPaused.current
+    val angle = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMillis, pausable, paused) {
+        val scale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
+        if (scale <= 0f) return@LaunchedEffect
+        val degreesPerNano = 360f / (periodMillis * scale * 1_000_000f)
+        var last = -1L
+        while (true) {
+            if (pausable && paused.value) {
+                snapshotFlow { paused.value }.first { !it }
+                last = -1L
+            }
+            withFrameNanos { now ->
+                if (last >= 0) angle.floatValue = (angle.floatValue + (now - last) * degreesPerNano) % 360f
+                last = now
+            }
+        }
+    }
+    return angle
+}

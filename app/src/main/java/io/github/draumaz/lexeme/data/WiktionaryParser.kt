@@ -22,6 +22,12 @@ object WiktionaryParser {
         ".mw-collapsible-toggle, span.indicator, .mf-icon, .catlinks, .mw-cite-backlink, " +
         "[style~=display:\\s*none]"
 
+    private val HeadingTag = Regex("h[1-6]")
+    private val StrokeGif = Regex("-[a-z]?order\\.gif$")
+
+    /** Block children that [Ctx.rich] flattens onto lines of their own. */
+    private val LINE_TAGS = setOf("p", "div", "li", "dd", "tr")
+
     private val BLOCK_TAGS = setOf(
         "p", "div", "ul", "ol", "dl", "dd", "dt", "li", "table", "figure", "img", "audio", "video",
         "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "center", "pre", "hr", "section", "caption",
@@ -87,7 +93,7 @@ object WiktionaryParser {
     private fun headingOf(el: Element): Triple<Int, String, String>? {
         val h = when {
             el.hasClass("mw-heading") -> el.selectFirst("h1, h2, h3, h4, h5, h6")
-            el.normalName().matches(Regex("h[1-6]")) -> el
+            el.normalName().matches(HeadingTag) -> el
             else -> null
         } ?: return null
         return Triple(h.normalName().drop(1).toInt(), h.text().trim(), h.id())
@@ -171,7 +177,7 @@ object WiktionaryParser {
             for (child in el.childNodes()) {
                 when (child) {
                     is TextNode -> b.text(child.text())
-                    is Element -> if (child.normalName() in setOf("p", "div", "li", "dd", "tr")) {
+                    is Element -> if (child.normalName() in LINE_TAGS) {
                         if (b.length > 0) b.newline()
                         richInto(child, b)
                     } else if (isBlock(child)) {
@@ -260,7 +266,7 @@ object WiktionaryParser {
                 tag == "figure" || tag == "img" || el.attr("typeof").startsWith("mw:File") ||
                     "thumb" in cls -> media(el)
                 tag == "blockquote" -> listOf(Block.Indented(IndentStyle.Quotation, blocksOf(el.childNodes())))
-                tag.matches(Regex("h[1-6]")) -> listOfNotNull(rich(el)?.let {
+                tag.matches(HeadingTag) -> listOfNotNull(rich(el)?.let {
                     Block.Paragraph(it.copy(spans = it.spans + Span(0, it.text.length, SpanStyleKind.Bold)))
                 })
                 tag == "hr" -> emptyList()
@@ -473,7 +479,7 @@ object WiktionaryParser {
 
     private fun isStrokeImage(img: Element): Boolean {
         val name = fileNameOf(img.attr("src")).lowercase()
-        return Regex("-[a-z]?order\\.gif$").containsMatchIn(name) || ("stroke" in name && "order" in name)
+        return StrokeGif.containsMatchIn(name) || ("stroke" in name && "order" in name)
     }
 
     /** The file name, from either an original URL or a `.../thumb/x/xy/Name.ext/250px-Name.ext` one. */

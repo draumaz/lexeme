@@ -94,12 +94,15 @@ private class GlassNode(
     private var lastBlurPx = -1f
     /** The last outline built, with what it was built for. */
     private var cachedOutline: Pair<Triple<Size, LayoutDirection, Shape>, Outline>? = null
+    /** The outline the render node already clips to, so it isn't rebuilt every frame. */
+    private var appliedOutline: Outline? = null
 
     override fun onDetach() {
         renderNode?.discardDisplayList()
         renderNode = null
         lastBlurPx = -1f
         cachedOutline = null
+        appliedOutline = null
     }
 
     // setBackdropRenderEffect is 37.2; every path to it is behind GlassSupported.
@@ -120,7 +123,10 @@ private class GlassNode(
         val h = size.height.roundToInt()
         val rn = renderNode ?: RenderNode("glass").also { renderNode = it }
         rn.setPosition(0, 0, w, h)
-        applyOutline(rn, shapeOutline)
+        if (shapeOutline !== appliedOutline) {
+            applyOutline(rn, shapeOutline)
+            appliedOutline = shapeOutline
+        }
 
         // A zero radius would still pay for the backdrop pass; drop the effect instead.
         val blurPx = blur().toPx().coerceAtLeast(0f)

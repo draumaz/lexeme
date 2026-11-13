@@ -92,7 +92,7 @@ fun BlockView(block: Block) {
         is Block.Audio -> AudioButton(block)
         is Block.Collapsible -> CollapsibleView(block)
         is Block.EtymologyTree -> EtymologyTreeView(block)
-        // Lifted into the language's stroke-order card by the parser; nothing left to draw.
+        // The parser lifts these into the language's stroke-order card; this is only a fallback.
         is Block.StrokeOrder -> StrokeOrderStrip(block.images)
     }
 }

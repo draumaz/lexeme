@@ -5,10 +5,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
@@ -31,6 +27,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,10 +46,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
@@ -78,15 +73,11 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.material3.Surface
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -111,11 +102,13 @@ import io.github.draumaz.lexeme.ui.blocks.LocalAudio
 import io.github.draumaz.lexeme.ui.blocks.LocalLinkHandler
 import io.github.draumaz.lexeme.ui.components.LocalScrollClaim
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.Color
 import io.github.draumaz.lexeme.ui.components.glass
 import io.github.draumaz.lexeme.ui.components.ScrollClaim
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
+import io.github.draumaz.lexeme.ui.components.LocalSpinPaused
+import io.github.draumaz.lexeme.ui.components.rememberSpin
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
@@ -241,9 +234,21 @@ fun LexemeRoot(
     // Every new (or returned-to) page starts with its toolbar out.
     LaunchedEffect(topId) { toolbarExpanded = true }
     val scrollClaim = remember { ScrollClaim() }
+    // Idle spins pause while anything scrolls (drags and flings alike pass through here),
+    // and pick up again once it has been still for a moment.
+    val spinPaused = remember { mutableStateOf(false) }
+    val scrollTicks = remember { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+    LaunchedEffect(Unit) {
+        scrollTicks.collectLatest {
+            spinPaused.value = true
+            kotlinx.coroutines.delay(250)
+            spinPaused.value = false
+        }
+    }
     val nested = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (consumed != Offset.Zero) scrollTicks.tryEmit(Unit)
                 if (scrollClaim.claimed) {
                     scrollClaim.claimed = false
                     return Offset.Zero
@@ -271,6 +276,7 @@ fun LexemeRoot(
         LocalAudio provides audio,
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
         LocalPaneSplit provides split,
+        LocalSpinPaused provides spinPaused,
     ) {
         SharedTransitionLayout {
         Box(
@@ -299,6 +305,8 @@ fun LexemeRoot(
                 label = "pages",
             ) { page ->
                 val isTop = page?.id == current?.id
+                val surface = MaterialTheme.colorScheme.surface
+                val pageTransition = transition
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -311,7 +319,13 @@ fun LexemeRoot(
                             shape = RoundedCornerShape(40.dp * p)
                             clip = p > 0f
                         }
-                        .background(MaterialTheme.colorScheme.surface)
+                        // A page needs its own opaque surface only while it overlaps another
+                        // (sliding in or out) or shrinks under a back gesture; otherwise the
+                        // root's surface is already there, and painting it twice is pure overdraw.
+                        .drawBehind {
+                            val moving = pageTransition.currentState != pageTransition.targetState
+                            if (moving || (isTop && backProgress > 0f)) drawRect(surface)
+                        }
                 ) {
                     if (page == null) {
                         HomeScreen(
@@ -571,8 +585,7 @@ private fun ScallopButton(
     size: Dp = 60.dp,
     onClick: () -> Unit,
 ) {
-    val idle = rememberInfiniteTransition(label = "scallopSpin")
-    val idleRotation by idle.animateFloat(0f, -360f, infiniteRepeatable(tween(11_000, easing = LinearEasing)), label = "scallopIdle")
+    val idleRotation by rememberSpin(-11_000)
     val kick = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current

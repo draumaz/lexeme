@@ -230,7 +230,10 @@ private fun Modifier.scrollFades(scroll: ScrollState): Modifier = composed {
     val end by animateFloatAsState(if (scroll.canScrollForward) 1f else 0f, label = "fadeEnd")
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val fade = with(LocalDensity.current) { 40.dp.toPx() }
-    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    // The fades punch holes in the layer, which needs it offscreen; a table that fits needs neither.
+    graphicsLayer {
+        compositingStrategy = if (scroll.maxValue > 0) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }
         .drawWithContent {
             drawContent()
             val left = if (rtl) end else start

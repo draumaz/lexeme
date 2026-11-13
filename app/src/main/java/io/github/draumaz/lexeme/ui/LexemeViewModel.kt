@@ -89,10 +89,12 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     fun open(title: String, fragment: String? = null) {
         val t = title.trim()
         if (t.isEmpty()) return
-        val page = Page(nextId++, t, fragment, cache.get(t)?.let { PageState.Loaded(it) } ?: PageState.Loading)
+        val cached = cache.get(t)
+        val page = Page(nextId++, t, fragment, cached?.let { PageState.Loaded(it) } ?: PageState.Loading)
         _pages.update { it + page }
         query.value = ""
-        if (page.state is PageState.Loaded) remember(t) else load(page)
+        // A cache hit may be a redirect ("Water" for "water"): history keeps the real title.
+        if (cached != null) remember(cached.title) else load(page)
     }
 
     fun retry(page: Page) {
@@ -130,11 +132,9 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
         historyStore.save(_recent.value)
     }
 
-    /** Pops one page; false when already home. */
-    fun back(): Boolean {
-        if (_pages.value.isEmpty()) return false
+    /** Pops one page; nothing when already home. */
+    fun back() {
         _pages.update { it.dropLast(1) }
-        return true
     }
 
     fun home() {
@@ -155,11 +155,6 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
                 _randomBusy.value = false
             }
         }
-    }
-
-    fun forget(title: String) {
-        _recent.update { list -> list.filter { it != title } }
-        historyStore.save(_recent.value)
     }
 
     fun clearHistory() {

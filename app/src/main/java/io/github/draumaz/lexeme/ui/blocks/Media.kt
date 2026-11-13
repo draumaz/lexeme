@@ -51,7 +51,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
@@ -252,7 +251,7 @@ fun AudioButton(block: Block.Audio) {
     val playing = audio.playing == block.url
     val preparing = audio.preparing == block.url
     // Only an active button spins; idle ones don't keep the frame clock running.
-    val rotation = if (playing || preparing) rememberSpin(2400) else null
+    val rotation = if (playing || preparing) rememberSpin(2400, pausable = false) else null
     val source = remember { MutableInteractionSource() }
     val colors = MaterialTheme.colorScheme
     val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()

@@ -46,6 +46,9 @@ class MainActivity : ComponentActivity() {
                 LexemeRoot(vm, settings, openExternal = ::openExternal, share = ::share)
             }
         }
+        // Compose paints the surface edge to edge, so the theme's window background would only
+        // be painted under it again every frame. It has done its job once the first frame is up.
+        window.setBackgroundDrawable(null)
     }
 
     override fun onNewIntent(intent: Intent) {

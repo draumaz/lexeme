@@ -11,12 +11,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +26,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -79,6 +75,7 @@ import io.github.draumaz.lexeme.ui.components.morphBackground
 import io.github.draumaz.lexeme.ui.components.glass
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
+import io.github.draumaz.lexeme.ui.components.rememberSpin
 import io.github.draumaz.lexeme.ui.theme.Wordmark
 import kotlinx.coroutines.launch
 
@@ -301,8 +298,7 @@ private fun HeroMark(modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val idle = rememberInfiniteTransition(label = "fabSpin")
-    val idleRotation by idle.animateFloat(0f, 360f, infiniteRepeatable(tween(14_000, easing = LinearEasing)), label = "fabIdle")
+    val idleRotation by rememberSpin(14_000)
     val kick = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current

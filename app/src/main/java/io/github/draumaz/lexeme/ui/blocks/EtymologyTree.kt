@@ -26,7 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -41,11 +41,13 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.draumaz.lexeme.data.Block
@@ -79,7 +81,10 @@ internal fun EtymologyTreeView(block: Block.EtymologyTree) {
 
 /** Fades whichever side still has more tree to scroll to, so cut-off cards read as "keep going". */
 private fun Modifier.edgeFade(scroll: ScrollState): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    // Masking needs an offscreen layer, but only a tree wider than the card has edges to fade.
+    .graphicsLayer {
+        compositingStrategy = if (scroll.maxValue > 0) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }
     .drawWithContent {
         drawContent()
         val fade = 36.dp.toPx()
@@ -192,21 +197,29 @@ private fun Twig(relation: String?, order: Int, leafUp: Boolean) {
     val colors = treeColors()
     val grow = rememberGrowth(order, bouncy = false)
     val leaf = rememberGrowth(order, bouncy = true)
+    // Leaves go on the side without a label.
+    val up = if (relation != null) false else leafUp
     Box(
         Modifier
             .widthIn(min = 28.dp)
             .height(32.dp)
-            .drawBehind {
+            // Paths are built once per size; growing only changes how much of them is drawn.
+            .drawWithCache {
                 val y = size.height / 2
-                val path = Path().apply {
-                    moveTo(0f, y)
-                    // A slight sag, so it reads as a branch rather than a rule.
-                    quadraticTo(size.width / 2, y + 3.dp.toPx(), size.width, y)
+                val branch = GrowingPath(
+                    Path().apply {
+                        moveTo(0f, y)
+                        // A slight sag, so it reads as a branch rather than a rule.
+                        quadraticTo(size.width / 2, y + 3.dp.toPx(), size.width, y)
+                    }
+                )
+                val base = Offset(size.width * 0.45f, y + 1.dp.toPx())
+                val leafPath = leafPath(base)
+                val stroke = 3.dp.toPx()
+                onDrawBehind {
+                    branch.draw(this, grow.value, colors.bark, stroke)
+                    drawLeaf(leafPath, base, up, leaf.value, colors.leaf)
                 }
-                drawPartial(path, grow.value, colors.bark, 3.dp.toPx())
-                // Leaves go on the side without a label.
-                val up = if (relation != null) false else leafUp
-                drawLeaf(Offset(size.width * 0.45f, y + 1.dp.toPx()), up, leaf.value, colors.leaf)
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -236,16 +249,26 @@ private fun Merge(order: Int, content: @Composable () -> Unit) {
     val ends = remember { Ends() }
     Layout(
         content = content,
-        modifier = Modifier.drawBehind {
-            val jx = size.width
-            val jy = size.height / 2
+        modifier = Modifier.drawWithCache {
             val stroke = 3.dp.toPx()
-            ends.ys.forEach { y ->
-                val path = Path().apply {
-                    moveTo(ends.x, y)
-                    cubicTo(ends.x + (jx - ends.x) * 0.7f, y, ends.x + (jx - ends.x) * 0.3f, jy, jx, jy)
+            // Limbs are rebuilt only when placement moves their ends (a new ys array).
+            var builtFor: FloatArray? = null
+            var limbs = emptyList<GrowingPath>()
+            onDrawBehind {
+                if (builtFor !== ends.ys) {
+                    val jx = size.width
+                    val jy = size.height / 2
+                    limbs = ends.ys.map { y ->
+                        GrowingPath(
+                            Path().apply {
+                                moveTo(ends.x, y)
+                                cubicTo(ends.x + (jx - ends.x) * 0.7f, y, ends.x + (jx - ends.x) * 0.3f, jy, jx, jy)
+                            }
+                        )
+                    }
+                    builtFor = ends.ys
                 }
-                drawPartial(path, grow.value, colors.bark, stroke)
+                limbs.forEach { it.draw(this, grow.value, colors.bark, stroke) }
             }
         },
     ) { measurables, constraints ->
@@ -275,32 +298,53 @@ private class Ends {
     var ys = FloatArray(0)
 }
 
-private fun DrawScope.drawPartial(path: Path, progress: Float, color: Color, width: Float) {
-    if (progress <= 0f) return
-    val measure = PathMeasure().apply { setPath(path, false) }
-    val part = Path()
-    measure.getSegment(0f, measure.length * progress.coerceIn(0f, 1f), part, true)
-    drawPath(part, color, style = Stroke(width = width, cap = StrokeCap.Round))
+/**
+ * A path drawn up to some fraction of its length. Its measure and the segment it cuts are
+ * reused frame to frame, and once fully grown it draws the path itself.
+ */
+private class GrowingPath(val path: Path) {
+    private val measure = PathMeasure().apply { setPath(path, false) }
+    private val segment = Path()
+
+    fun draw(scope: DrawScope, progress: Float, color: Color, width: Float) {
+        if (progress <= 0f) return
+        val style = Stroke(width = width, cap = StrokeCap.Round)
+        if (progress >= 1f) {
+            scope.drawPath(path, color, style = style)
+            return
+        }
+        segment.rewind()
+        measure.getSegment(0f, measure.length * progress, segment, true)
+        scope.drawPath(segment, color, style = style)
+    }
+}
+
+/** The geometry of a full-size leaf on its stem from [base], pointing right; [drawLeaf] turns and scales it. */
+private class LeafPath(val stemEnd: Offset, val blade: Path, val ribEnd: Offset)
+
+private fun Density.leafPath(base: Offset): LeafPath {
+    val len = 10.dp.toPx()
+    val half = 2.5.dp.toPx()
+    val start = Offset(base.x + 3.dp.toPx(), base.y)
+    val tip = Offset(start.x + len, start.y)
+    val blade = Path().apply {
+        moveTo(start.x, start.y)
+        cubicTo(start.x + len * 0.3f, start.y - half * 1.6f, start.x + len * 0.75f, start.y - half * 1.2f, tip.x, tip.y)
+        cubicTo(start.x + len * 0.75f, start.y + half * 1.2f, start.x + len * 0.3f, start.y + half * 1.6f, start.x, start.y)
+        close()
+    }
+    return LeafPath(start, blade, Offset(tip.x - len * 0.2f, tip.y))
 }
 
 /** A slim leaf on a short stem, sprouting from [base] up or down; [scale] pops it in. */
-private fun DrawScope.drawLeaf(base: Offset, up: Boolean, scale: Float, color: Color) {
+private fun DrawScope.drawLeaf(leaf: LeafPath, base: Offset, up: Boolean, scale: Float, color: Color) {
     if (scale <= 0f) return
-    val stem = 3.dp.toPx() * scale
-    val len = 10.dp.toPx() * scale
-    val half = 2.5.dp.toPx() * scale
     rotate(if (up) -48f else 48f, pivot = base) {
-        val start = Offset(base.x + stem, base.y)
-        drawLine(color, base, start, strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
-        val tip = Offset(start.x + len, start.y)
-        val leaf = Path().apply {
-            moveTo(start.x, start.y)
-            cubicTo(start.x + len * 0.3f, start.y - half * 1.6f, start.x + len * 0.75f, start.y - half * 1.2f, tip.x, tip.y)
-            cubicTo(start.x + len * 0.75f, start.y + half * 1.2f, start.x + len * 0.3f, start.y + half * 1.6f, start.x, start.y)
-            close()
+        scale(scale, pivot = base) {
+            drawLine(color, base, leaf.stemEnd, strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
+            drawPath(leaf.blade, color)
+            drawLine(color.copy(alpha = 0.45f).compositeOverBlack(), leaf.stemEnd, leaf.ribEnd, strokeWidth = 1.dp.toPx())
         }
-        drawPath(leaf, color)
-        drawLine(color.copy(alpha = 0.45f).compositeOverBlack(), start, Offset(tip.x - len * 0.2f, tip.y), strokeWidth = 1.dp.toPx() * scale)
     }
 }
 

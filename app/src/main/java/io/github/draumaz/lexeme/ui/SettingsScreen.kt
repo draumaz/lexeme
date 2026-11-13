@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.graphics.shapes.Morph
 import io.github.draumaz.lexeme.ui.components.morphBackground
 import io.github.draumaz.lexeme.ui.components.pressScale
@@ -290,7 +291,9 @@ private fun SegmentSurface(
     val color = MaterialTheme.colorScheme.surfaceContainerHigh
     Column(modifier.padding(bottom = 3.dp)) {
         if (onClick != null) {
-            Surface(onClick = onClick, enabled = enabled, shape = shape, color = color, modifier = Modifier.fillMaxWidth()) { content() }
+            // Surface has no role of its own, so a switch row says so to TalkBack here.
+            val semanticRole = if (role != null) Modifier.semantics { this.role = role } else Modifier
+            Surface(onClick = onClick, enabled = enabled, shape = shape, color = color, modifier = Modifier.fillMaxWidth().then(semanticRole)) { content() }
         } else {
             Surface(shape = shape, color = color, modifier = Modifier.fillMaxWidth()) { content() }
         }
