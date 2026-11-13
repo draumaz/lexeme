@@ -262,7 +262,8 @@ fun LexemeRoot(
     // Two panes on tablets and across a dual-screen hinge: the search bar heads the start pane,
     // and the reading, its toolbar, docked search and settings all live in the end pane.
     val split = rememberPaneSplit()
-    val endPane = Modifier.padding(start = split?.endOffset ?: 0.dp)
+    val sideBySide = split != null && !split.stacked
+    val endPane = split?.endPane ?: Modifier
 
     CompositionLocalProvider(
         LocalLinkHandler provides linkHandler,
@@ -382,8 +383,8 @@ fun LexemeRoot(
                 enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn(),
                 exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { -it } + fadeOut(),
                 modifier = Modifier
-                    .align(if (split != null) Alignment.TopStart else Alignment.TopCenter)
-                    .then(if (split != null) Modifier.width(split.start) else Modifier.fillMaxWidth())
+                    .align(if (sideBySide) Alignment.TopStart else Alignment.TopCenter)
+                    .then(if (sideBySide) Modifier.width(split.start) else Modifier.fillMaxWidth())
                     .statusBarsPadding()
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp),
             ) {
@@ -396,6 +397,8 @@ fun LexemeRoot(
                 visible = dockedSearch || dockedFocused,
                 enter = fadeIn(),
                 exit = fadeOut(),
+                // In the end pane: stacked, its suggestions fill the room between hinge and keyboard
+                // (scrolling if need be) rather than growing up across the hinge.
                 modifier = Modifier
                     .fillMaxSize()
                     .then(endPane)

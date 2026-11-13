@@ -98,7 +98,7 @@ internal fun EntryOverview(
     // Like the reading list, the viewport starts below the search bar so nothing scrolls behind it.
     LazyColumn(
         state = listState,
-        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding() - 96.dp),
+        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         modifier = Modifier
             .fillMaxSize()
             .padding(top = contentPadding.calculateTopPadding())

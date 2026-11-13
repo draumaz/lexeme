@@ -92,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
 import androidx.graphics.shapes.RoundedPolygon
 import io.github.draumaz.lexeme.data.Entry
 import io.github.draumaz.lexeme.data.LanguageEntry
@@ -142,10 +143,10 @@ fun PageScreen(
         }
         when {
             state is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding)
-            split != null -> PaneRow(
+            split != null -> Panes(
                 split,
                 start = { PendingOverview(page.title, contentPadding) },
-                end = { Status(PaddingValues(top = statusTop + 16.dp, bottom = contentPadding.calculateBottomPadding())) },
+                end = { Status(PaddingValues(top = split.endTopInset(statusTop) + 16.dp, bottom = contentPadding.calculateBottomPadding())) },
             )
             else -> Status(contentPadding)
         }
@@ -451,7 +452,8 @@ private fun EntryView(
                 }
             }
             val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-            PaneRow(
+            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            Panes(
                 split,
                 start = {
                     EntryOverview(
@@ -460,11 +462,14 @@ private fun EntryView(
                         currentLanguage = currentLanguage,
                         readingRow = { readingRow },
                         onJump = { row -> scope.launch { listState.animateScrollToItem(row) } },
-                        contentPadding = contentPadding,
+                        contentPadding = PaddingValues(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = split.startBottomInset(navBottom) + 16.dp,
+                        ),
                         seen = seen,
                     )
                 },
-                end = { Reading(top = statusTop + 12.dp) },
+                end = { Reading(top = split.endTopInset(statusTop) + 12.dp) },
             )
         }
     }

@@ -174,11 +174,12 @@ fun HomeScreen(
             }
         } else {
             // Two panes (a tablet, or the two screens of a dual-screen phone): the mark and
-            // Surprise me on one side, the words to try with the search scallop on the other.
-            PaneRow(
+            // Surprise me on one side (or the top), the words and search scallop on the other.
+            // Side by side, the words clear the settings button above them; stacked, it's on the other screen.
+            Panes(
                 split,
-                start = { Centered(top + 24.dp, bottom + 24.dp) { Hero() } },
-                end = { Centered(top + 72.dp, bottom + 124.dp) { Words() } },
+                start = { Centered(top + 24.dp, split.startBottomInset(bottom) + 24.dp) { Hero() } },
+                end = { Centered(split.endTopInset(top) + if (split.stacked) 24.dp else 72.dp, bottom + 124.dp) { Words() } },
             )
         }
         SettingsButton(
