@@ -87,7 +87,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.graphics.shapes.RoundedPolygon
 import io.github.draumaz.lexeme.data.Entry
 import io.github.draumaz.lexeme.data.LanguageEntry
@@ -118,6 +122,8 @@ fun PageScreen(
     onOpen: (String) -> Unit,
     onRetry: () -> Unit,
 ) {
+    val split = LocalPaneSplit.current
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     AnimatedContent(
         targetState = page.state,
         contentKey = { it::class },
@@ -127,13 +133,34 @@ fun PageScreen(
         },
         label = "pageState",
     ) { state ->
-        when (state) {
-            PageState.Loading -> LoadingView(page.title, contentPadding)
-            is PageState.Missing -> MissingView(page.title, state.suggestions, contentPadding, onOpen)
-            is PageState.Failed -> FailedView(state.message, contentPadding, onRetry)
-            is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding)
+        @Composable
+        fun Status(padding: PaddingValues) = when (state) {
+            PageState.Loading -> LoadingView(page.title, padding)
+            is PageState.Missing -> MissingView(page.title, state.suggestions, padding, onOpen)
+            is PageState.Failed -> FailedView(state.message, padding, onRetry)
+            is PageState.Loaded -> Unit
+        }
+        when {
+            state is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding)
+            split != null -> PaneRow(
+                split,
+                start = { PendingOverview(page.title, contentPadding) },
+                end = { Status(PaddingValues(top = statusTop + 16.dp, bottom = contentPadding.calculateBottomPadding())) },
+            )
+            else -> Status(contentPadding)
         }
     }
+}
+
+/** The start pane while a page loads or fails: just the word, where its title will land. */
+@Composable
+private fun PendingOverview(title: String, contentPadding: PaddingValues) {
+    Text(
+        title,
+        style = MaterialTheme.typography.displayMediumEmphasized,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = contentPadding.calculateTopPadding()).padding(horizontal = 24.dp).padding(top = 8.dp),
+    )
 }
 
 @Composable
@@ -233,9 +260,15 @@ private sealed interface EntryRow {
     ) : EntryRow { override val key = "sec-$langIndex-$index" }
 }
 
-private fun rowsFor(entry: Entry): List<EntryRow> = buildList {
-    add(EntryRow.Title)
-    if (entry.languages.size > 1) add(EntryRow.Chips)
+/**
+ * The reading list's rows. With [overviewApart] (two panes) the title and language picker live in
+ * the start pane's overview instead, so the list is just the languages.
+ */
+private fun rowsFor(entry: Entry, overviewApart: Boolean): List<EntryRow> = buildList {
+    if (!overviewApart) {
+        add(EntryRow.Title)
+        if (entry.languages.size > 1) add(EntryRow.Chips)
+    }
     entry.languages.forEachIndexed { li, lang ->
         add(EntryRow.LanguageHeader(lang, li))
         if (lang.strokeOrder.isNotEmpty()) add(EntryRow.Strokes(lang, li))
@@ -252,10 +285,13 @@ private fun rowsFor(entry: Entry): List<EntryRow> = buildList {
 /** Height of the pinned language picker; language headers scroll to just below it. */
 internal val LanguagePickerOffset = 76.dp
 
+/** How far below the list's top a language header lands: under the picker, or flush on two panes. */
+internal fun languageScrollOffset(split: PaneSplit?): Dp = if (split != null) 0.dp else LanguagePickerOffset
+
 /** List indices of each language's header, or none when there's only one language (and no picker). */
-internal fun languageRowIndices(entry: Entry): List<Int> =
+internal fun languageRowIndices(entry: Entry, overviewApart: Boolean): List<Int> =
     if (entry.languages.size < 2) emptyList()
-    else rowsFor(entry).withIndex().filter { it.value is EntryRow.LanguageHeader }.map { it.index }
+    else rowsFor(entry, overviewApart).withIndex().filter { it.value is EntryRow.LanguageHeader }.map { it.index }
 
 /**
  * Scrolls up one language: to the start of the one being read, or to the one before if already
@@ -286,19 +322,26 @@ private fun EntryView(
     seen: MutableSet<Any>,
     contentPadding: PaddingValues,
 ) {
-    val rows = remember(entry) { rowsFor(entry) }
+    val split = LocalPaneSplit.current
+    val overviewApart = split != null
+    val rows = remember(entry, overviewApart) { rowsFor(entry, overviewApart) }
     val languageRows = remember(rows) { rows.withIndex().filter { it.value is EntryRow.LanguageHeader }.map { it.index } }
     val languageRowSet = remember(languageRows) { languageRows.toHashSet() }
     // When this entry appeared: only rows composed right away stagger in.
     val shownAt = remember(entry) { SystemClock.uptimeMillis() }
-    val stickyOffset = with(LocalDensity.current) { LanguagePickerOffset.roundToPx() }
+    val stickyOffset = with(LocalDensity.current) { languageScrollOffset(split).roundToPx() }
     val scope = rememberCoroutineScope()
-    val currentLanguage by remember(languageRows) {
+    // The reading line: rows whose tops have passed it are being read. Under the pinned picker
+    // on one pane; a quarter of the way down on two, where nothing is pinned over the list.
+    fun readingLine(): Int {
+        val info = listState.layoutInfo
+        return if (overviewApart) (info.viewportEndOffset - info.viewportStartOffset) / 4 else stickyOffset + 8
+    }
+    val currentLanguage by remember(languageRows, overviewApart) {
         derivedStateOf {
-            // The language whose header has most recently passed under the pinned picker.
-            val info = listState.layoutInfo
-            val line = stickyOffset + 8
-            val passed = info.visibleItemsInfo.lastOrNull { it.index in languageRowSet && it.offset <= line }
+            // The language whose header has most recently passed the reading line.
+            val line = readingLine()
+            val passed = listState.layoutInfo.visibleItemsInfo.lastOrNull { it.index in languageRowSet && it.offset <= line }
             if (passed != null) {
                 languageRows.indexOf(passed.index).coerceAtLeast(0)
             } else {
@@ -329,7 +372,8 @@ private fun EntryView(
         }
     }
 
-    CompositionLocalProvider(LocalLinkHandler provides handler) {
+    @Composable
+    fun Reading(top: Dp) {
         // The viewport starts below the search bar (rather than padding the content) so the
         // pinned language picker sticks under the bar instead of sliding behind it.
         LazyColumn(
@@ -337,7 +381,7 @@ private fun EntryView(
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = contentPadding.calculateTopPadding())
+                .padding(top = top)
                 .testTag("entry_list"),
         ) {
             rows.forEachIndexed { rowIndex, row ->
@@ -393,10 +437,57 @@ private fun EntryView(
             }
         }
     }
+
+    CompositionLocalProvider(LocalLinkHandler provides handler) {
+        if (split == null) {
+            Reading(top = contentPadding.calculateTopPadding())
+        } else {
+            val outline = remember(rows) { outlineOf(entry, rows) }
+            // The row at the reading line, for the overview's "you are here".
+            val readingRow by remember {
+                derivedStateOf {
+                    val line = readingLine()
+                    listState.layoutInfo.visibleItemsInfo.lastOrNull { it.offset <= line }?.index ?: listState.firstVisibleItemIndex
+                }
+            }
+            val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            PaneRow(
+                split,
+                start = {
+                    EntryOverview(
+                        entry = entry,
+                        outline = outline,
+                        currentLanguage = currentLanguage,
+                        readingRow = { readingRow },
+                        onJump = { row -> scope.launch { listState.animateScrollToItem(row) } },
+                        contentPadding = contentPadding,
+                        seen = seen,
+                    )
+                },
+                end = { Reading(top = statusTop + 12.dp) },
+            )
+        }
+    }
+}
+
+/** Each language's header row in the reading list, and each of its sections' rows. */
+private fun outlineOf(entry: Entry, rows: List<EntryRow>): List<OutlineLanguage> {
+    val headers = HashMap<Int, Int>()
+    val sections = HashMap<Int, MutableList<OutlineSection>>()
+    rows.forEachIndexed { i, row ->
+        when (row) {
+            is EntryRow.LanguageHeader -> headers[row.index] = i
+            is EntryRow.SectionRow -> sections.getOrPut(row.langIndex) { mutableListOf() }.add(OutlineSection(row.section, i))
+            else -> Unit
+        }
+    }
+    return entry.languages.mapIndexed { li, lang ->
+        OutlineLanguage(lang, li, headers[li] ?: 0, sections[li].orEmpty())
+    }
 }
 
 @Composable
-private fun EntryTitle(entry: Entry, animate: Boolean, modifier: Modifier = Modifier) {
+internal fun EntryTitle(entry: Entry, animate: Boolean, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 12.dp)) {
         PoppingTitle(
@@ -559,11 +650,11 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
     }
 }
 
-private fun partsOfSpeech(lang: LanguageEntry): String =
+internal fun partsOfSpeech(lang: LanguageEntry): String =
     lang.sections.filter { it.kind == SectionKind.PART_OF_SPEECH || it.kind == SectionKind.CHARACTER }
         .map { it.title }.distinct().joinToString(" · ")
 
-private fun initials(name: String): String {
+internal fun initials(name: String): String {
     val words = name.split(' ', '-').filter { it.isNotBlank() }
     return if (words.size >= 2) "${words[0].first()}${words[1].first()}" else name.take(2)
 }
@@ -600,9 +691,9 @@ private fun LanguageHeader(lang: LanguageEntry, index: Int, wobbleIn: Boolean, m
     }
 }
 
-private data class KindLook(val icon: ImageVector, val shape: RoundedPolygon)
+internal data class KindLook(val icon: ImageVector, val shape: RoundedPolygon)
 
-private fun lookOf(kind: SectionKind) = when (kind) {
+internal fun lookOf(kind: SectionKind) = when (kind) {
     SectionKind.ETYMOLOGY -> KindLook(Icons.Rounded.History, MaterialShapes.Cookie9Sided)
     SectionKind.PRONUNCIATION -> KindLook(Icons.Rounded.RecordVoiceOver, MaterialShapes.Sunny)
     SectionKind.PART_OF_SPEECH -> KindLook(Icons.Rounded.AutoStories, MaterialShapes.Clover4Leaf)

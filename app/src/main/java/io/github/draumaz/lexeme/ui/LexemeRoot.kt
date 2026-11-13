@@ -115,6 +115,7 @@ import androidx.compose.ui.graphics.Color
 import io.github.draumaz.lexeme.ui.components.glass
 import io.github.draumaz.lexeme.ui.components.ScrollClaim
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
@@ -177,6 +178,14 @@ fun LexemeRoot(
         listStates.keys.retainAll(pageIds.toSet())
         seenSets.keys.retainAll(pageIds.toSet())
         audio.stop()
+    }
+
+    // Opening a page (Surprise me beside settings, on two panes, or "Look up" from another
+    // app) closes settings so the page isn't hidden behind them. Not on recreation, though.
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { pages.lastOrNull()?.id }
+            .drop(1)
+            .collect { settingsOpen = false }
     }
 
     val snackbar = remember { SnackbarHostState() }
@@ -250,12 +259,17 @@ fun LexemeRoot(
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentPadding = PaddingValues(top = top + 84.dp, bottom = bottom + 112.dp)
     val current = pages.lastOrNull()
+    // Two panes on tablets and across a dual-screen hinge: the search bar heads the start pane,
+    // and the reading, its toolbar, docked search and settings all live in the end pane.
+    val split = rememberPaneSplit()
+    val endPane = Modifier.padding(start = split?.endOffset ?: 0.dp)
 
     CompositionLocalProvider(
         LocalLinkHandler provides linkHandler,
         LocalScrollClaim provides scrollClaim,
         LocalAudio provides audio,
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+        LocalPaneSplit provides split,
     ) {
         SharedTransitionLayout {
         Box(
@@ -368,10 +382,10 @@ fun LexemeRoot(
                 enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn(),
                 exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { -it } + fadeOut(),
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(if (split != null) Alignment.TopStart else Alignment.TopCenter)
+                    .then(if (split != null) Modifier.width(split.start) else Modifier.fillMaxWidth())
                     .statusBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-                    .fillMaxWidth(),
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
             ) {
                 Bar(focusRequester, fromBottom = false, Modifier.fillMaxWidth())
             }
@@ -384,6 +398,7 @@ fun LexemeRoot(
                 exit = fadeOut(),
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(endPane)
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .imePadding()
@@ -409,12 +424,13 @@ fun LexemeRoot(
                 exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .then(endPane)
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp),
             ) {
                 val title = (current?.state as? PageState.Loaded)?.entry?.title ?: current?.title.orEmpty()
                 val pillsShown = current != null && toolbarExpanded
-                val pickerOffset = with(LocalDensity.current) { LanguagePickerOffset.roundToPx() }
+                val pickerOffset = with(LocalDensity.current) { languageScrollOffset(split).roundToPx() }
                 // Up-one-language only once the page's top is a screen or more behind you.
                 val listState = current?.id?.let { id -> listStates.getOrPut(id) { LazyListState() } }
                 val farFromTop by remember(listState) {
@@ -445,7 +461,7 @@ fun LexemeRoot(
                         modifier = Modifier.padding(bottom = 10.dp).testTag("toolbar_top"),
                     ) {
                         val id = current?.id ?: return@ScallopButton
-                        val languageRows = (current.state as? PageState.Loaded)?.entry?.let(::languageRowIndices).orEmpty()
+                        val languageRows = (current.state as? PageState.Loaded)?.entry?.let { languageRowIndices(it, overviewApart = split != null) }.orEmpty()
                         scope.launch { listStates[id]?.scrollUpOneLanguage(languageRows, pickerOffset) }
                     }
                 }
@@ -483,6 +499,7 @@ fun LexemeRoot(
                 snackbar,
                 Modifier
                     .align(Alignment.BottomCenter)
+                    .then(endPane)
                     .navigationBarsPadding()
                     // Just clear of the scallop: 16dp below it, its height, and a 12dp gap.
                     .padding(bottom = 16.dp + SearchFabSize + 12.dp),
@@ -493,6 +510,7 @@ fun LexemeRoot(
                 visible = settingsOpen,
                 enter = slideInHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
                 exit = slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { it } + fadeOut(),
+                modifier = endPane,
             ) {
                 SettingsScreen(
                     modifier = Modifier.graphicsLayer {

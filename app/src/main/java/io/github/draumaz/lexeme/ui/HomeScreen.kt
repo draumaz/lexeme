@@ -98,17 +98,10 @@ fun HomeScreen(
     // No search bar up top here, so the content centres in the space above the search button.
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-    Column(
-        Modifier
-            .verticalScroll(rememberScrollState())
-            .heightIn(min = maxHeight)
-            .fillMaxWidth()
-            .padding(top = top + 24.dp, bottom = bottom + 124.dp)
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
+    val split = LocalPaneSplit.current
+
+    @Composable
+    fun Hero() {
         HeroMark(Modifier.bouncyEnter("hero", seen, 0))
         Spacer(Modifier.height(16.dp))
         Text(
@@ -140,8 +133,10 @@ fun HomeScreen(
             Spacer(Modifier.width(10.dp))
             Text("Surprise me", style = MaterialTheme.typography.titleMedium)
         }
-        Spacer(Modifier.height(36.dp))
+    }
 
+    @Composable
+    fun Words() {
         if (recent.isNotEmpty()) {
             SectionLabel(Icons.Rounded.History, "Recent", Modifier.bouncyEnter("recentLabel", seen, 4)) {
                 TextButton(onClick = onClearHistory, modifier = Modifier.testTag("clear_history")) { Text("Clear") }
@@ -152,12 +147,46 @@ fun HomeScreen(
             WordChips(Samples, seen, prefix = "try", onOpen = onOpen)
         }
     }
-    SettingsButton(
-        onClick = onOpenSettings,
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(top = top + 12.dp, end = 20.dp),
-    )
+
+    /** A pane's content, scrolling if it must but otherwise centred in the room it has. */
+    @Composable
+    fun Centered(topPad: androidx.compose.ui.unit.Dp, bottomPad: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .heightIn(min = maxHeight)
+                    .fillMaxWidth()
+                    .padding(top = topPad, bottom = bottomPad)
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) { content() }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        if (split == null) {
+            Centered(top + 24.dp, bottom + 124.dp) {
+                Hero()
+                Spacer(Modifier.height(36.dp))
+                Words()
+            }
+        } else {
+            // Two panes (a tablet, or the two screens of a dual-screen phone): the mark and
+            // Surprise me on one side, the words to try with the search scallop on the other.
+            PaneRow(
+                split,
+                start = { Centered(top + 24.dp, bottom + 24.dp) { Hero() } },
+                end = { Centered(top + 72.dp, bottom + 124.dp) { Words() } },
+            )
+        }
+        SettingsButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = top + 12.dp, end = 20.dp),
+        )
     }
 }
 
