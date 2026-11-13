@@ -245,16 +245,24 @@ fun LexemeRoot(
             spinPaused.value = false
         }
     }
-    val nested = remember {
+    val toolbarTravel = with(LocalDensity.current) { 12.dp.toPx() }
+    val nested = remember(toolbarTravel) {
         object : NestedScrollConnection {
+            /** How far the page has moved in its current direction (negative is down the page). */
+            var run = 0f
+
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 if (consumed != Offset.Zero) scrollTicks.tryEmit(Unit)
                 if (scrollClaim.claimed) {
                     scrollClaim.claimed = false
                     return Offset.Zero
                 }
+                // Distance adds up within a direction, so a slow drag (a few pixels a frame)
+                // counts as much as a flick; turning around starts the count again.
                 val dy = consumed.y + available.y
-                if (dy < -8f) toolbarExpanded = false else if (dy > 8f) toolbarExpanded = true
+                if (dy == 0f) return Offset.Zero
+                run = if ((dy > 0f) == (run > 0f)) run + dy else dy
+                if (run < -toolbarTravel) toolbarExpanded = false else if (run > toolbarTravel) toolbarExpanded = true
                 return Offset.Zero
             }
         }
