@@ -304,10 +304,13 @@ val LocalSpinPaused = staticCompositionLocalOf<State<Boolean>> { mutableStateOf(
 
 /**
  * A slow, endless turn in degrees for badges that idle by rotating, one full turn every
- * [periodMillis]; negative turns the other way. Unless it's [pausable] = false (a busy
- * indicator), it stops where it is while [LocalSpinPaused] is set and requests no frames at
- * all, then carries on from the same angle. It honours the system animation scale, and
- * doesn't turn at all with animations off.
+ * [periodMillis]; negative turns the other way.
+ *
+ * Unless it's [pausable] = false (a busy indicator), it stops while [LocalSpinPaused] is set,
+ * and stops with some weight: a kick onward in its own direction into an underdamped spring
+ * that overshoots and settles back, like a wheel slammed to a halt. While stopped it requests
+ * no frames at all. When the page comes to rest it winds back up to speed rather than jumping
+ * straight to it. It honours the system animation scale, and doesn't turn with animations off.
  */
 @Composable
 fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Float> {
@@ -317,17 +320,42 @@ fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Fl
         val scale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
         if (scale <= 0f) return@LaunchedEffect
         val degreesPerNano = 360f / (periodMillis * scale * 1_000_000f)
+        val direction = if (periodMillis < 0) -1f else 1f
         var last = -1L
+        // When the current wind-up began; the spin reaches full speed SpinUpNanos later.
+        var spunUpFrom = -1L
         while (true) {
             if (pausable && paused.value) {
+                val slam = Animatable(angle.floatValue)
+                slam.animateTo(
+                    angle.floatValue + direction * SlamDegrees,
+                    spring(dampingRatio = 0.32f, stiffness = Spring.StiffnessMediumLow),
+                    initialVelocity = direction * SlamKick,
+                ) { angle.floatValue = value % 360f }
                 snapshotFlow { paused.value }.first { !it }
                 last = -1L
+                spunUpFrom = -1L
             }
             withFrameNanos { now ->
-                if (last >= 0) angle.floatValue = (angle.floatValue + (now - last) * degreesPerNano) % 360f
+                if (spunUpFrom < 0) spunUpFrom = now
+                if (last >= 0) {
+                    // Ease in from standstill, so a resumed spin gathers speed like it has mass.
+                    val t = ((now - spunUpFrom) / (SpinUpNanos * scale)).coerceIn(0f, 1f)
+                    val speed = t * t * (3f - 2f * t)
+                    angle.floatValue = (angle.floatValue + (now - last) * degreesPerNano * speed) % 360f
+                }
                 last = now
             }
         }
     }
     return angle
 }
+
+/** How far past its stopping point a slammed spin is thrown before the spring pulls it back. */
+private const val SlamDegrees = 14f
+
+/** The kick a slam starts with, in degrees per second, so the stop reads as sudden. */
+private const val SlamKick = 420f
+
+/** How long a resumed spin takes to wind back up to full speed. */
+private const val SpinUpNanos = 650_000_000f
