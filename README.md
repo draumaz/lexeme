@@ -1,5 +1,9 @@
 # Lexeme
 
+<p align="center">
+  <img src="docs/social-preview.png" alt="Lexeme: an Android client for English Wiktionary">
+</p>
+
 An Android client for English Wiktionary, written in Kotlin with Jetpack Compose and
 Material 3 Expressive. Search for a word and the app shows the full entry for every
 language on the page.
