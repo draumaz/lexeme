@@ -46,6 +46,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.FindInPage
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -74,6 +79,7 @@ import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
@@ -129,15 +135,11 @@ fun LexemeRoot(
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
     val randomBusy by vm.randomBusy.collectAsStateWithLifecycle()
 
-    // Two search fields: the one pinned atop entries, and the one the scallop turns into,
-    // docked above the keyboard. Each tracks its own focus so only one opens its dropdown.
-    var topFocused by remember { mutableStateOf(false) }
-    var dockedFocused by remember { mutableStateOf(false) }
-    val focused = topFocused || dockedFocused
+    // The search field the scallop turns into, docked above the keyboard.
+    var focused by remember { mutableStateOf(false) }
     var settingsOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Set by the search scallop; the docked bar composes (morphing out of it), then takes focus.
     var dockedSearch by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
     val dockedFocus = remember { FocusRequester() }
     LaunchedEffect(dockedSearch) {
         if (dockedSearch) {
@@ -145,8 +147,22 @@ fun LexemeRoot(
             dockedFocus.requestFocus()
         }
     }
+    // Find on page: its button morphs into a bar docked above the keyboard, as search's does.
+    val find = remember { FindState() }
+    val findFocus = remember { FocusRequester() }
+    LaunchedEffect(find.open) {
+        if (find.open) {
+            androidx.compose.runtime.withFrameNanos { }
+            findFocus.requestFocus()
+        }
+    }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    fun closeFind() {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        find.open = false
+    }
     val haptics = LocalHapticFeedback.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -163,6 +179,7 @@ fun LexemeRoot(
     LaunchedEffect(topId) {
         focusManager.clearFocus()
         keyboard?.hide()
+        find.reset()
     }
     // Keyed on the stack itself, not page contents: a page finishing loading in the
     // background mustn't cut off a pronunciation that's playing.
@@ -204,7 +221,7 @@ fun LexemeRoot(
 
     // Predictive back shrinks the current page under the finger, then pops it.
     var backProgress by remember { mutableFloatStateOf(0f) }
-    PredictiveBackHandler(enabled = pages.isNotEmpty() && !focused) { events ->
+    PredictiveBackHandler(enabled = pages.isNotEmpty() && !focused && !find.open) { events ->
         try {
             events.collect { backProgress = it.progress }
             vm.back()
@@ -227,6 +244,8 @@ fun LexemeRoot(
             settingsBack = 0f
         }
     }
+    // Back closes find before it leaves the page.
+    BackHandler(enabled = find.open && !settingsOpen) { closeFind() }
 
     // The toolbar tucks into its FAB while reading down, and comes back on any upward scroll.
     // Scrolls claimed by an inner list (the language picker) don't count.
@@ -270,7 +289,7 @@ fun LexemeRoot(
 
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val contentPadding = PaddingValues(top = top + 84.dp, bottom = bottom + 112.dp)
+    val contentPadding = PaddingValues(top = top + 16.dp, bottom = bottom + 112.dp)
     val current = pages.lastOrNull()
     // Two panes on tablets and across a dual-screen hinge: the search bar heads the start pane,
     // and the reading, its toolbar, docked search and settings all live in the end pane.
@@ -352,9 +371,29 @@ fun LexemeRoot(
                             contentPadding = contentPadding,
                             onOpen = ::submit,
                             onRetry = { vm.retry(page) },
+                            onLoadMore = { kind -> vm.loadMore(page.id, kind) },
+                            find = find.takeIf { it.open && isTop },
                         )
                     }
                 }
+            }
+
+            // Pages scroll up under the status bar; a short fade behind it keeps the clock and
+            // icons readable over text without painting a bar across the page.
+            if (current != null) {
+                val surface = MaterialTheme.colorScheme.surface
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(top + 16.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                0f to surface.copy(alpha = 0.95f),
+                                0.55f to surface.copy(alpha = 0.8f),
+                                1f to surface.copy(alpha = 0f),
+                            )
+                        )
+                )
             }
 
             AnimatedVisibility(focused, enter = fadeIn(), exit = fadeOut()) {
@@ -366,57 +405,10 @@ fun LexemeRoot(
                 )
             }
 
-            @Composable
-            fun Bar(
-                requester: FocusRequester,
-                fromBottom: Boolean,
-                modifier: Modifier,
-                fieldModifier: Modifier = Modifier,
-            ) = SearchBar(
-                query = query,
-                onQueryChange = { vm.query.value = it },
-                onSubmit = ::submit,
-                focused = if (fromBottom) dockedFocused else topFocused,
-                onFocusChange = {
-                    if (fromBottom) {
-                        // Losing focus folds the docked bar back into the scallop.
-                        if (dockedFocused && !it) dockedSearch = false
-                        dockedFocused = it
-                    } else {
-                        topFocused = it
-                    }
-                },
-                focusRequester = requester,
-                canGoBack = pages.isNotEmpty(),
-                onBack = {
-                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                    if (focused) focusManager.clearFocus() else vm.back()
-                },
-                suggestions = suggestions,
-                recent = recent,
-                fromBottom = fromBottom,
-                modifier = modifier,
-                fieldModifier = fieldModifier,
-            )
-
-            // Entry pages keep the bar pinned up top.
-            AnimatedVisibility(
-                visible = current != null,
-                enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn(),
-                exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { -it } + fadeOut(),
-                modifier = Modifier
-                    .align(if (sideBySide) Alignment.TopStart else Alignment.TopCenter)
-                    .then(if (sideBySide) Modifier.width(split.start) else Modifier.fillMaxWidth())
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
-            ) {
-                Bar(focusRequester, fromBottom = false, Modifier.fillMaxWidth())
-            }
-
             // The search scallop's bar: docked above the keyboard, its field morphing out of the
             // scallop (shared bounds), and back into it when search closes.
             AnimatedVisibility(
-                visible = dockedSearch || dockedFocused,
+                visible = dockedSearch || focused,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 // In the end pane: stacked, its suggestions fill the room between hinge and keyboard
@@ -429,10 +421,26 @@ fun LexemeRoot(
                     .imePadding()
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             ) {
-                Bar(
-                    dockedFocus,
+                SearchBar(
+                    query = query,
+                    onQueryChange = { vm.query.value = it },
+                    onSubmit = ::submit,
+                    focused = focused,
+                    onFocusChange = {
+                        // Losing focus folds the docked bar back into the scallop.
+                        if (focused && !it) dockedSearch = false
+                        focused = it
+                    },
+                    focusRequester = dockedFocus,
+                    canGoBack = pages.isNotEmpty(),
+                    onBack = {
+                        haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                        if (focused) focusManager.clearFocus() else vm.back()
+                    },
+                    suggestions = suggestions,
+                    recent = recent,
                     fromBottom = true,
-                    Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     fieldModifier = Modifier.sharedBounds(
                         rememberSharedContentState(SearchMorphKey),
                         animatedVisibilityScope = this,
@@ -441,10 +449,39 @@ fun LexemeRoot(
                 )
             }
 
+            // Find on page's bar: docked above the keyboard, morphing out of its button like search's.
+            AnimatedVisibility(
+                visible = find.open,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .then(endPane)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            ) {
+                FindBar(
+                    find = find,
+                    focusRequester = findFocus,
+                    onClose = {
+                        haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                        closeFind()
+                    },
+                    modifier = Modifier
+                        .sharedBounds(
+                            rememberSharedContentState(FindMorphKey),
+                            animatedVisibilityScope = this,
+                            boundsTransform = SearchMorphBounds,
+                        )
+                        .onGloballyPositioned { find.barTop = it.positionInRoot().y },
+                )
+            }
+
             // One rotating search scallop, bottom centre on every screen. On entries the actions
             // (home and share) sit in see-through circles either side of it, and tuck into it while reading down.
             AnimatedVisibility(
-                visible = !focused && !dockedSearch,
+                visible = !focused && !dockedSearch && !find.open,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
                 exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
                 modifier = Modifier
@@ -453,7 +490,12 @@ fun LexemeRoot(
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp),
             ) {
-                val title = (current?.state as? PageState.Loaded)?.entry?.title ?: current?.title.orEmpty()
+                val group = this
+                val title = when (val state = current?.state) {
+                    is PageState.Loaded -> state.entry.title
+                    is PageState.Category -> state.category.title
+                    else -> current?.title.orEmpty()
+                }
                 val pillsShown = current != null && toolbarExpanded
                 val pickerOffset = with(LocalDensity.current) { languageScrollOffset(split).roundToPx() }
                 // Up-one-language only once the page's top is a screen or more behind you.
@@ -471,24 +513,53 @@ fun LexemeRoot(
                     }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Up-one-language floats just above the scallop, so home and share either side stay balanced.
-                AnimatedVisibility(
+                // Up-one-language and find on page float just above the scallop, centred over it
+                // together (or find alone), so home and share either side stay balanced.
+                val canFind = current?.state is PageState.Loaded
+                Row(verticalAlignment = Alignment.Bottom) {
+                androidx.compose.animation.AnimatedVisibility(
                     visible = pillsShown && farFromTop,
+                    // Its width grows and shrinks too, so find on page glides aside to make room.
+                    enter = expandHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), expandFrom = Alignment.Start) +
+                        scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
+                        slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } + fadeIn(),
+                    exit = shrinkHorizontally(spring(stiffness = Spring.StiffnessMedium), shrinkTowards = Alignment.Start) +
+                        scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
+                        slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 2 } + fadeOut(),
+                ) {
+                    ScallopButton(
+                        icon = Icons.Rounded.ArrowUpward,
+                        // Category pages have no languages: the same button just goes to the top.
+                        description = if (current?.state is PageState.Category) "Back to top" else "Up one language",
+                        size = 52.dp,
+                        modifier = Modifier.padding(bottom = 10.dp, end = if (canFind) 12.dp else 0.dp).testTag("toolbar_top"),
+                    ) {
+                        val id = current?.id ?: return@ScallopButton
+                        val languageRows = (current.state as? PageState.Loaded)?.entry?.let { languageRowIndices(it, overviewApart = split != null) }.orEmpty()
+                        scope.launch { listStates[id]?.scrollUpOneLanguage(languageRows, pickerOffset) }
+                    }
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = pillsShown && canFind,
                     enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
                         slideInVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it / 2 } + fadeIn(),
                     exit = scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.3f, transformOrigin = TransformOrigin(0.5f, 1f)) +
                         slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 2 } + fadeOut(),
                 ) {
                     ScallopButton(
-                        icon = Icons.Rounded.ArrowUpward,
-                        description = "Up one language",
+                        icon = Icons.Rounded.FindInPage,
+                        description = "Find on page",
                         size = 52.dp,
-                        modifier = Modifier.padding(bottom = 10.dp).testTag("toolbar_top"),
-                    ) {
-                        val id = current?.id ?: return@ScallopButton
-                        val languageRows = (current.state as? PageState.Loaded)?.entry?.let { languageRowIndices(it, overviewApart = split != null) }.orEmpty()
-                        scope.launch { listStates[id]?.scrollUpOneLanguage(languageRows, pickerOffset) }
-                    }
+                        modifier = Modifier
+                            .padding(bottom = 10.dp)
+                            .sharedBounds(
+                                rememberSharedContentState(FindMorphKey),
+                                animatedVisibilityScope = group,
+                                boundsTransform = SearchMorphBounds,
+                            )
+                            .testTag("toolbar_find"),
+                    ) { find.open = true }
+                }
                 }
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     SearchFab(
@@ -640,6 +711,7 @@ private fun Modifier.toolbarGlass(shape: Shape): Modifier {
 private const val ToolbarGlassTint = 0.6f
 
 private const val SearchMorphKey = "searchMorph"
+private const val FindMorphKey = "findMorph"
 
 /** A slightly bouncy spring for the scallop-to-bar morph, so the bar lands with a little give. */
 @OptIn(ExperimentalSharedTransitionApi::class)

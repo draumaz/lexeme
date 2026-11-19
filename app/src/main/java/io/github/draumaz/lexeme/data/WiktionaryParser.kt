@@ -34,7 +34,7 @@ object WiktionaryParser {
         "tr", "td", "th", "tbody", "thead", "tfoot", "figcaption",
     )
 
-    fun parse(title: String, html: String): Entry {
+    fun parse(title: String, html: String, categories: List<String> = emptyList()): Entry {
         val doc = Jsoup.parseBodyFragment(html)
         val root = doc.selectFirst("div.mw-parser-output") ?: doc.body()
         root.select(SKIP).remove()
@@ -80,7 +80,34 @@ object WiktionaryParser {
             title = title,
             seeAlso = seeAlso,
             languages = languages.map { it.build() },
+            categories = categories,
         )
+    }
+
+    /** Category-page clutter: the A–Z jump table, recent/oldest additions, the catfix stub. */
+    private const val CATEGORY_SKIP = "table.toc, .categoryTOC-full, .categoryTOC, #newest-and-oldest-pages, " +
+        ".newest-and-oldest-pages, ul.catfix"
+
+    /**
+     * A category page's own text: the breadcrumb trail (top first) and the description under it.
+     * Members aren't in this HTML; they come from `list=categorymembers`.
+     */
+    fun parseCategory(title: String, html: String): Pair<List<Breadcrumb>, List<Block>> {
+        val doc = Jsoup.parseBodyFragment(html)
+        val root = doc.selectFirst("div.mw-parser-output") ?: doc.body()
+        val crumbs = root.selectFirst(".ts-categoryBreadcrumbs")
+        val breadcrumbs = crumbs?.select("a[href]")?.mapNotNull { a ->
+            a.attr("href").substringAfter("/wiki/$CategoryPrefix", "").substringBefore('#')
+                .takeIf { it.isNotEmpty() }
+                ?.let { decode(it).replace('_', ' ') }
+                ?.let { name -> Breadcrumb(a.text().trim().ifEmpty { name }, name) }
+        }.orEmpty()
+        crumbs?.remove()
+        root.select(SKIP).remove()
+        root.select(CATEGORY_SKIP).remove()
+        val nodes = ArrayList<Node>()
+        flatten(root, nodes)
+        return breadcrumbs to Ctx(title).blocksOf(nodes)
     }
 
     /** MobileFrontend wraps each language in a `<section>`; unwrap so headings and content are siblings. */
@@ -247,7 +274,7 @@ object WiktionaryParser {
             val title = decode(path.substringBefore('#')).replace('_', ' ')
             val fragment = path.substringAfter('#', "").takeIf { it.isNotEmpty() }?.let(::decode)
             val namespace = title.substringBefore(':', "")
-            return if (namespace in setOf("File", "Category", "Special", "Help", "Talk", "User")) {
+            return if (namespace in setOf("File", "Special", "Help", "Talk", "User")) {
                 Link.External(if (href.startsWith("http")) href else "https://en.wiktionary.org$href")
             } else {
                 Link.Wiki(title, fragment)

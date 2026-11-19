@@ -142,6 +142,7 @@ private fun SenseList(list: Block.ListBlock) {
 @Composable
 private fun BulletList(list: Block.ListBlock) {
     var showAll by remember(list) { mutableStateOf(false) }
+    OpenForFind({ list.items.drop(LIST_PREVIEW).flatten() }) { showAll = true }
     val visible = if (showAll) list.items else list.items.take(LIST_PREVIEW)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         visible.forEach { item ->
@@ -181,6 +182,7 @@ private fun ShowAllButton(total: Int, onClick: () -> Unit) {
 @Composable
 private fun ChipList(list: Block.ListBlock) {
     var showAll by remember(list) { mutableStateOf(false) }
+    OpenForFind({ list.items.drop(LIST_PREVIEW).flatten() }) { showAll = true }
     val visible = if (showAll) list.items else list.items.take(LIST_PREVIEW)
     val onLink = LocalLinkHandler.current
     val haptics = LocalHapticFeedback.current
@@ -221,6 +223,7 @@ private fun QuotationFold(list: Block.ListBlock) {
     FoldPill(
         label = if (count == 1) "1 quotation" else "$count quotations",
         tag = "quotations",
+        hidden = { list.items.flatten() },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             list.items.forEach { item ->
@@ -231,8 +234,9 @@ private fun QuotationFold(list: Block.ListBlock) {
 }
 
 @Composable
-private fun FoldPill(label: String, tag: String, content: @Composable () -> Unit) {
+private fun FoldPill(label: String, tag: String, hidden: () -> List<Block>, content: @Composable () -> Unit) {
     var open by remember { mutableStateOf(false) }
+    OpenForFind(hidden) { open = true }
     val haptics = LocalHapticFeedback.current
     val rotation by animateFloatAsState(if (open) 180f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "chevron")
     val source = remember { MutableInteractionSource() }
@@ -300,12 +304,18 @@ private fun IndentedView(block: Block.Indented) {
 
 @Composable
 fun CollapsibleView(block: Block.Collapsible) {
-    CollapsibleFrame(block.title, block.startExpanded) { BlockList(block.blocks) }
+    CollapsibleFrame(block.title, block.startExpanded, hidden = { block.blocks }) { BlockList(block.blocks) }
 }
 
 @Composable
-fun CollapsibleFrame(title: RichText, startExpanded: Boolean, content: @Composable () -> Unit) {
+fun CollapsibleFrame(
+    title: RichText,
+    startExpanded: Boolean,
+    hidden: () -> List<Block> = { emptyList() },
+    content: @Composable () -> Unit,
+) {
     var open by remember(title) { mutableStateOf(startExpanded) }
+    OpenForFind(hidden) { open = true }
     val haptics = LocalHapticFeedback.current
     val rotation by animateFloatAsState(if (open) 180f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "chevron")
     val corner by androidx.compose.animation.core.animateDpAsState(

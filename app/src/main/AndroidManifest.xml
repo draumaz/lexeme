@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The heavy click when a long press starts selecting text. Granted at install, no prompt. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".LexemeApp"

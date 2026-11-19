@@ -9,6 +9,8 @@ data class Entry(
     /** Page-level "See also" line (other capitalisations, diacritics). */
     val seeAlso: RichText?,
     val languages: List<LanguageEntry>,
+    /** Visible categories (hidden maintenance ones dropped), as names without the `Category:` prefix. */
+    val categories: List<String> = emptyList(),
 )
 
 data class LanguageEntry(
@@ -178,4 +180,47 @@ sealed interface Link {
     /** A page on English Wiktionary; [fragment] usually names a language section. */
     data class Wiki(val title: String, val fragment: String?) : Link
     data class External(val url: String) : Link
+}
+
+const val CategoryPrefix = "Category:"
+
+/** Whether [title] names a category page, however the prefix is cased. */
+fun isCategoryTitle(title: String): Boolean = title.trim().startsWith(CategoryPrefix, ignoreCase = true)
+
+/**
+ * A `Category:` page: Wiktionary's own description of it, then its members, which arrive a
+ * batch at a time from `list=categorymembers`.
+ */
+data class CategoryPage(
+    /** The full, normalised title, e.g. `Category:Russian lemmas`. */
+    val title: String,
+    /** The trail from the top of the category tree down to this one. */
+    val breadcrumbs: List<Breadcrumb>,
+    val description: List<Block>,
+    /** Categories this one sits in (hidden ones dropped). */
+    val parents: List<String>,
+    val pageCount: Int,
+    val subcategoryCount: Int,
+    val subcategories: CategoryMembers,
+    val pages: CategoryMembers,
+) {
+    /** The title without its prefix: `Russian lemmas`. */
+    val name: String get() = title.removePrefix(CategoryPrefix)
+
+    fun members(kind: MemberKind): CategoryMembers = when (kind) {
+        MemberKind.Subcategories -> subcategories
+        MemberKind.Pages -> pages
+    }
+}
+
+/** A step up the category tree: the site's short [label] ("Russian") for the category [name] ("Russian language"). */
+data class Breadcrumb(val label: String, val name: String)
+
+/** One batch-loaded run of a category's members. [next] continues it; null once all are in. */
+data class CategoryMembers(val titles: List<String>, val next: String?) {
+    operator fun plus(more: CategoryMembers) = CategoryMembers(titles + more.titles, more.next)
+
+    companion object {
+        val Empty = CategoryMembers(emptyList(), null)
+    }
 }

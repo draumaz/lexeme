@@ -123,6 +123,58 @@ class WiktionaryParserTest {
         assertEquals(Link.Wiki("Hund", "German"), p.text.spans.single { it.link != null }.link)
     }
 
+    @Test
+    fun categoryLinksStayInTheApp() {
+        val entry = WiktionaryParser.parse(
+            "прочь",
+            page(h(2, "Russian") + """<p>See <a href="/wiki/Category:Russian_adverbs">adverbs</a> and """ +
+                """<a href="/wiki/File:X.ogg">a file</a>.</p>"""),
+            categories = listOf("Russian adverbs"),
+        )
+        val links = (entry.languages[0].intro.single() as Block.Paragraph).text.spans.mapNotNull { it.link }
+        assertEquals(Link.Wiki("Category:Russian adverbs", null), links[0])
+        assertTrue(links[1] is Link.External)
+        assertEquals(listOf("Russian adverbs"), entry.categories)
+    }
+
+    @Test
+    fun categoryPageKeepsTrailAndDescriptionDropsClutter() {
+        val (trail, blocks) = WiktionaryParser.parseCategory(
+            "Category:Russian terms with audio pronunciation",
+            page(
+                """<div style="float: right;"><div class="noprint plainlinks"><a href="https://x">Edit category data</a></div>""" +
+                    """<table class="wikitable mw-collapsible" id="newest-and-oldest-pages"><tr><th>Newest and oldest pages</th></tr></table></div>""" +
+                    """<div role="navigation" class="ts-categoryBreadcrumbs"><ol>""" +
+                    """<li><a href="/wiki/Category:Fundamental">Fundamental</a></li>""" +
+                    """<li><span class="ts-categoryBreadcrumbs-separator">&#160;» </span><a href="/wiki/Category:All_languages">All languages</a></li>""" +
+                    """<li><span class="ts-categoryBreadcrumbs-separator">&#160;» </span><a href="/wiki/Category:Russian_language">Russian</a></li>""" +
+                    """</ol></div>""" +
+                    """<p>Russian terms that include the pronunciation in the form of an audio file.</p>""" +
+                    """<table class="wikitable plainlinks categoryTOC-full toc"><tr><td><a href="/w/index.php?from=А">А</a></td></tr></table>""" +
+                    """<ul class="catfix"></ul>"""
+            ),
+        )
+        assertEquals(
+            listOf(
+                Breadcrumb("Fundamental", "Fundamental"),
+                Breadcrumb("All languages", "All languages"),
+                Breadcrumb("Russian", "Russian language"),
+            ),
+            trail,
+        )
+        assertEquals(
+            "Russian terms that include the pronunciation in the form of an audio file.",
+            (blocks.single() as Block.Paragraph).text.text,
+        )
+    }
+
+    @Test
+    fun recognisesCategoryTitles() {
+        assertTrue(isCategoryTitle("Category:Russian lemmas"))
+        assertTrue(isCategoryTitle(" category:russian lemmas"))
+        assertTrue(!isCategoryTitle("categorical"))
+    }
+
     /**
      * Parses real pages saved from the API, if [SAMPLES] points at them (`<word>.html` files
      * holding the `parse.text` of `action=parse`). Prints a structural outline for eyeballing.

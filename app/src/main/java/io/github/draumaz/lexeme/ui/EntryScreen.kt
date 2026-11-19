@@ -96,9 +96,24 @@ import androidx.graphics.shapes.RoundedPolygon
 import io.github.draumaz.lexeme.data.Entry
 import io.github.draumaz.lexeme.data.LanguageEntry
 import io.github.draumaz.lexeme.data.Link
+import io.github.draumaz.lexeme.data.MemberKind
 import io.github.draumaz.lexeme.data.Section
 import io.github.draumaz.lexeme.data.SectionKind
 import io.github.draumaz.lexeme.ui.blocks.BlockList
+import io.github.draumaz.lexeme.ui.blocks.FindHighlight
+import io.github.draumaz.lexeme.ui.blocks.LocalFindHighlight
+import io.github.draumaz.lexeme.ui.blocks.matchStarts
+import io.github.draumaz.lexeme.ui.blocks.richTexts
+import io.github.draumaz.lexeme.data.RichText
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.runtime.mutableIntStateOf
+import io.github.draumaz.lexeme.ui.components.SelectableText
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import kotlinx.coroutines.flow.first
 import io.github.draumaz.lexeme.ui.blocks.LocalLinkHandler
 import io.github.draumaz.lexeme.ui.blocks.RichTextView
 import io.github.draumaz.lexeme.ui.blocks.StrokeOrderCard
@@ -121,6 +136,9 @@ fun PageScreen(
     contentPadding: PaddingValues,
     onOpen: (String) -> Unit,
     onRetry: () -> Unit,
+    onLoadMore: (MemberKind) -> Unit,
+    /** Find on page, while it's open on this page. */
+    find: FindState? = null,
 ) {
     val split = LocalPaneSplit.current
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -138,10 +156,11 @@ fun PageScreen(
             PageState.Loading -> LoadingView(page.title, padding)
             is PageState.Missing -> MissingView(page.title, state.suggestions, padding, onOpen)
             is PageState.Failed -> FailedView(state.message, padding, onRetry)
-            is PageState.Loaded -> Unit
+            is PageState.Loaded, is PageState.Category -> Unit
         }
         when {
-            state is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding)
+            state is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding, find)
+            state is PageState.Category -> CategoryView(state, listState, seen, contentPadding, onLoadMore)
             split != null -> Panes(
                 split,
                 start = { PendingOverview(page.title, contentPadding) },
@@ -258,6 +277,7 @@ private sealed interface EntryRow {
     data class SectionRow(
         val section: Section, val langIndex: Int, val index: Int, val first: Boolean, val last: Boolean,
     ) : EntryRow { override val key = "sec-$langIndex-$index" }
+    data class Categories(val groups: List<CategoryGroup>) : EntryRow { override val key = "categories" }
 }
 
 /**
@@ -280,10 +300,76 @@ private fun rowsFor(entry: Entry, overviewApart: Boolean): List<EntryRow> = buil
             add(EntryRow.SectionRow(s, li, si, first = pos == 0, last = pos == count - 1))
         }
     }
+    if (entry.categories.isNotEmpty()) {
+        add(EntryRow.Categories(groupCategories(entry.categories, entry.languages.map { it.name })))
+    }
 }
 
-/** Height of the pinned language picker; language headers scroll to just below it. */
-internal val LanguagePickerOffset = 76.dp
+/** Find on page over an entry's rows: where every match is, numbered from the top of the page. */
+private class FindIndex(
+    /** Rows holding matches, top to bottom. */
+    val rows: IntArray,
+    /** The page-wide number of each of those rows' first match. */
+    val firsts: IntArray,
+    /** Per row, each text's matches as row-local numbers. */
+    val ranges: Map<Int, Map<RichText, IntRange>>,
+    val total: Int,
+) {
+    /** Which of [rows] holds match number [match]. */
+    fun rowOf(match: Int): Int {
+        val at = firsts.binarySearch(match)
+        return if (at >= 0) at else -at - 2
+    }
+
+    /** The first match in row [row] or below it, or the very first if there are none below. */
+    fun firstFrom(row: Int): Int {
+        val at = rows.indexOfFirst { it >= row }
+        return if (at >= 0) firsts[at] else 0
+    }
+
+    companion object {
+        val Empty = FindIndex(IntArray(0), IntArray(0), emptyMap(), 0)
+    }
+}
+
+/** The texts find on page looks through in a row, in the order the row shows them. */
+private fun EntryRow.richTexts(entry: Entry): Sequence<RichText> = when (this) {
+    EntryRow.Title -> listOfNotNull(entry.seeAlso).asSequence()
+    is EntryRow.Intro -> lang.intro.richTexts()
+    is EntryRow.SectionRow -> section.blocks.richTexts()
+    else -> emptySequence()
+}
+
+private fun findIndexOf(entry: Entry, rows: List<EntryRow>, query: String): FindIndex {
+    val hitRows = ArrayList<Int>()
+    val firsts = ArrayList<Int>()
+    val ranges = HashMap<Int, Map<RichText, IntRange>>()
+    var total = 0
+    rows.forEachIndexed { i, row ->
+        val inRow = java.util.IdentityHashMap<RichText, IntRange>()
+        var n = 0
+        for (text in row.richTexts(entry)) {
+            val count = matchStarts(text.text, query).size
+            if (count > 0) {
+                inRow[text] = n until n + count
+                n += count
+            }
+        }
+        if (n > 0) {
+            hitRows += i
+            firsts += total
+            ranges[i] = inRow
+            total += n
+        }
+    }
+    return FindIndex(hitRows.toIntArray(), firsts.toIntArray(), ranges, total)
+}
+
+/**
+ * How far below the list's top padding a language header lands: just below the pinned picker,
+ * which sits 16dp higher than the padding (under the status bar) and is 76dp tall with its gap.
+ */
+internal val LanguagePickerOffset = 60.dp
 
 /** How far below the list's top a language header lands: under the picker, or flush on two panes. */
 internal fun languageScrollOffset(split: PaneSplit?): Dp = if (split != null) 0.dp else LanguagePickerOffset
@@ -321,6 +407,7 @@ private fun EntryView(
     listState: LazyListState,
     seen: MutableSet<Any>,
     contentPadding: PaddingValues,
+    find: FindState?,
 ) {
     val split = LocalPaneSplit.current
     val overviewApart = split != null
@@ -365,6 +452,72 @@ private fun EntryView(
         }
     }
 
+    // Find on page: count the matches, step through them, light them up.
+    val needle = find?.needle.orEmpty()
+    val findIndex = remember(rows, needle) { if (needle.isEmpty()) FindIndex.Empty else findIndexOf(entry, rows, needle) }
+    val currentFindIndex by rememberUpdatedState(findIndex)
+    var listTop by remember { mutableFloatStateOf(0f) }
+    var listTopPad by remember { mutableFloatStateOf(0f) }
+    var findToken by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val revealMatch: suspend (Float, Float) -> Boolean = remember(listState, density) {
+        { top, bottom ->
+            // Let a jump to the row finish first, then nudge the match itself into the clear:
+            // below the pinned picker, above the find bar (and the keyboard under it).
+            snapshotFlow { listState.isScrollInProgress }.first { !it }
+            val margin = with(density) { 24.dp.toPx() }
+            val listBottom = listTop + listState.layoutInfo.viewportSize.height
+            val barTop = find?.barTop?.takeUnless { it.isNaN() } ?: listBottom
+            val bandTop = listTop + listTopPad + stickyOffset + margin
+            val bandBottom = minOf(barTop, listBottom) - margin
+            if (top < bandTop || bottom > bandBottom) {
+                // Land it a third of the way down the clear space, with room to read around it.
+                val target = bandTop + (bandBottom - bandTop - (bottom - top)).coerceAtLeast(0f) / 3f
+                listState.animateScrollBy(top - target)
+                true
+            } else {
+                false
+            }
+        }
+    }
+    if (find != null) {
+        // A new query starts from the first match at or below where you're reading.
+        LaunchedEffect(findIndex) {
+            find.total = findIndex.total
+            find.current = findIndex.firstFrom(listState.firstVisibleItemIndex)
+            find.steps++
+        }
+        LaunchedEffect(find.steps) {
+            val index = currentFindIndex
+            if (index.total == 0) return@LaunchedEffect
+            val row = index.rows[index.rowOf(find.current)]
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == row }) {
+                listState.animateScrollToItem(row, -stickyOffset)
+            }
+            findToken++
+        }
+    }
+    val activeHit = if (find != null && findIndex.total > 0) findIndex.rowOf(find.current.coerceIn(0, findIndex.total - 1)) else -1
+    val activeRow = if (activeHit >= 0) findIndex.rows[activeHit] else -1
+    val activeOrdinal = if (activeHit >= 0) find!!.current - findIndex.firsts[activeHit] else -1
+
+    /**
+     * A row of reading text: selectable for copying (a section at a time; selections can't
+     * span lazily composed rows reliably), and lit up by find on page. Find's highlight is
+     * always provided, even as null, so rows keep their state as find opens and closes.
+     */
+    @Composable
+    fun Findable(rowIndex: Int, content: @Composable () -> Unit) {
+        val ranges = findIndex.ranges[rowIndex]
+        val active = if (rowIndex == activeRow) activeOrdinal else -1
+        val highlight = remember(ranges, needle, active, findToken) {
+            ranges?.let { FindHighlight(needle, it, active, findToken, revealMatch) }
+        }
+        CompositionLocalProvider(LocalFindHighlight provides highlight) {
+            SelectableText(content)
+        }
+    }
+
     LaunchedEffect(entry, fragment) {
         if (fragment != null && listState.firstVisibleItemIndex == 0) {
             val target = languageIndexFor(entry, fragment)
@@ -374,21 +527,24 @@ private fun EntryView(
 
     @Composable
     fun Reading(top: Dp) {
-        // The viewport starts below the search bar (rather than padding the content) so the
-        // pinned language picker sticks under the bar instead of sliding behind it.
+        // The list runs right up to the top of the screen, so the page scrolls up under the
+        // status bar instead of being cut off below it; the picker pins itself under the bar.
+        listTopPad = with(density) { top.toPx() }
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+            contentPadding = PaddingValues(top = top, bottom = contentPadding.calculateBottomPadding()),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = top)
+                .onGloballyPositioned { listTop = it.positionInRoot().y }
                 .testTag("entry_list"),
         ) {
             rows.forEachIndexed { rowIndex, row ->
                 when (row) {
                     EntryRow.Title -> item(key = row.key) {
                         val fresh = remember { row.key !in seen }
-                        EntryTitle(entry, animate = fresh, modifier = Modifier.bouncyEnter(row.key, seen, 0))
+                        Findable(rowIndex) {
+                            EntryTitle(entry, animate = fresh, modifier = Modifier.bouncyEnter(row.key, seen, 0))
+                        }
                     }
                     EntryRow.Chips -> stickyHeader(key = row.key) {
                         LanguagePicker(entry.languages, currentLanguage, ::scrollToLanguage)
@@ -416,13 +572,20 @@ private fun EntryView(
                                 .bouncyEnter(row.key, seen, order),
                         ) {
                             CompositionLocalProvider(LocalTextStyle provides MaterialTheme.typography.bodyLarge) {
-                                BlockList(row.lang.intro, Modifier.fillMaxWidth().padding(18.dp))
+                                Findable(rowIndex) {
+                                    BlockList(row.lang.intro, Modifier.fillMaxWidth().padding(18.dp))
+                                }
                             }
                         }
                     }
                     is EntryRow.SectionRow -> item(key = row.key) {
                         val order = rememberStagger(rowIndex.coerceAtMost(8), shownAt)
-                        SectionCard(row, Modifier.bouncyEnter(row.key, seen, order))
+                        Findable(rowIndex) {
+                            SectionCard(row, reveal = rowIndex == activeRow, modifier = Modifier.bouncyEnter(row.key, seen, order))
+                        }
+                    }
+                    is EntryRow.Categories -> item(key = row.key) {
+                        CategoriesBox(row.groups, title = "Categories", modifier = Modifier.padding(top = 20.dp))
                     }
                 }
             }
@@ -531,7 +694,10 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
     val hue = hueFor(current.name)
     val spin by rememberSpin(16_000)
     val source = remember { MutableInteractionSource() }
-    Box(Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 16.dp, vertical = 8.dp)) {
+    // Pinned at the very top of the list: clear of the status bar, with nothing painted around
+    // the pill, so the page shows through either side of it rather than being cut off.
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = statusTop + 8.dp, bottom = 8.dp)) {
         Surface(
             shape = RoundedCornerShape(corner),
             color = colors.surfaceContainerHigh,
@@ -711,7 +877,7 @@ internal fun lookOf(kind: SectionKind) = when (kind) {
 }
 
 @Composable
-private fun SectionCard(row: EntryRow.SectionRow, modifier: Modifier = Modifier) {
+private fun SectionCard(row: EntryRow.SectionRow, reveal: Boolean, modifier: Modifier = Modifier) {
     val section = row.section
     val kind = section.kind
     val colors = MaterialTheme.colorScheme
@@ -721,6 +887,8 @@ private fun SectionCard(row: EntryRow.SectionRow, modifier: Modifier = Modifier)
     var expanded by rememberSaveable {
         mutableStateOf(kind != SectionKind.REFERENCES && !section.title.startsWith("Anagrams"))
     }
+    // Find on page stepping to a match in here opens it.
+    LaunchedEffect(reveal, LocalFindHighlight.current?.token) { if (reveal) expanded = true }
     val rotation by animateFloatAsState(if (expanded) 0f else -90f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "chevron")
     val badgeTurn by animateFloatAsState(if (expanded) 0f else -45f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "badgeTurn")
     val look = lookOf(kind)

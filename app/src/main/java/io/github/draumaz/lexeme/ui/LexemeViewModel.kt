@@ -4,7 +4,11 @@ import android.app.Application
 import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.draumaz.lexeme.data.CategoryPage
+import io.github.draumaz.lexeme.data.CategoryResult
 import io.github.draumaz.lexeme.data.Entry
+import io.github.draumaz.lexeme.data.MemberKind
+import io.github.draumaz.lexeme.data.isCategoryTitle
 import io.github.draumaz.lexeme.data.HistoryStore
 import io.github.draumaz.lexeme.data.LookupResult
 import io.github.draumaz.lexeme.data.WiktionaryApi
@@ -26,6 +30,16 @@ import kotlinx.coroutines.launch
 sealed interface PageState {
     data object Loading : PageState
     data class Loaded(val entry: Entry) : PageState
+
+    /**
+     * A category page. [loading] is the member list fetching its next batch, if any;
+     * [failed] the one whose last batch didn't arrive, so the list can offer a retry.
+     */
+    data class Category(
+        val category: CategoryPage,
+        val loading: MemberKind? = null,
+        val failed: MemberKind? = null,
+    ) : PageState
     data class Missing(val suggestions: List<String>) : PageState
     data class Failed(val message: String) : PageState
 }
@@ -50,6 +64,8 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     private val api = WiktionaryApi()
     private val historyStore = HistoryStore(app)
     private val cache = LruCache<String, Entry>(16)
+    /** Category pages as last seen, members loaded so far included. */
+    private val categoryCache = LruCache<String, CategoryPage>(8)
     private var nextId = 1L
 
     private val _pages = MutableStateFlow<List<Page>>(emptyList())
@@ -89,11 +105,20 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     fun open(title: String, fragment: String? = null) {
         val t = title.trim()
         if (t.isEmpty()) return
+        if (isCategoryTitle(t)) return openCategory(t)
         val cached = cache.get(t)
         val page = Page(nextId++, t, fragment, cached?.let { PageState.Loaded(it) } ?: PageState.Loading)
         _pages.update { it + page }
         query.value = ""
         // A cache hit may be a redirect ("Water" for "water"): history keeps the real title.
+        if (cached != null) remember(cached.title) else load(page)
+    }
+
+    private fun openCategory(title: String) {
+        val cached = categoryCache.get(title)
+        val page = Page(nextId++, title, null, cached?.let { PageState.Category(it) } ?: PageState.Loading)
+        _pages.update { it + page }
+        query.value = ""
         if (cached != null) remember(cached.title) else load(page)
     }
 
@@ -103,6 +128,7 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun load(page: Page) {
+        if (isCategoryTitle(page.title)) return loadCategory(page)
         viewModelScope.launch {
             val state = try {
                 when (val result = api.lookup(page.title)) {
@@ -120,6 +146,57 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
                 PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
             }
             replace(page.id) { it.copy(state = state) }
+        }
+    }
+
+    private fun loadCategory(page: Page) {
+        viewModelScope.launch {
+            val state = try {
+                when (val result = api.category(page.title)) {
+                    is CategoryResult.Found -> {
+                        categoryCache.put(page.title, result.category)
+                        categoryCache.put(result.category.title, result.category)
+                        remember(result.category.title)
+                        PageState.Category(result.category)
+                    }
+                    CategoryResult.Missing -> PageState.Missing(emptyList())
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
+            }
+            replace(page.id) { it.copy(state = state) }
+        }
+    }
+
+    /** Fetches the next batch of [kind] members for a category page; one batch at a time. */
+    fun loadMore(pageId: Long, kind: MemberKind) {
+        val state = _pages.value.firstOrNull { it.id == pageId }?.state as? PageState.Category ?: return
+        if (state.loading != null) return
+        val members = state.category.members(kind)
+        val from = members.next ?: return
+        replace(pageId) { it.copy(state = state.copy(loading = kind, failed = null)) }
+        viewModelScope.launch {
+            val more = try {
+                api.categoryMembers(state.category.title, kind, from)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            replace(pageId) { page ->
+                val current = page.state as? PageState.Category ?: return@replace page
+                if (more == null) return@replace page.copy(state = current.copy(loading = null, failed = kind))
+                val category = current.category.let {
+                    when (kind) {
+                        MemberKind.Subcategories -> it.copy(subcategories = it.subcategories + more)
+                        MemberKind.Pages -> it.copy(pages = it.pages + more)
+                    }
+                }
+                categoryCache.put(category.title, category)
+                page.copy(state = current.copy(category = category, loading = null, failed = null))
+            }
         }
     }
 

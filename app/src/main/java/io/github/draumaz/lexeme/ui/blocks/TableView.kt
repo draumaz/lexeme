@@ -77,6 +77,7 @@ private const val ROW_PREVIEW = 40
 @Composable
 fun TableView(table: Block.Table) {
     var showAll by remember(table) { mutableStateOf(false) }
+    OpenForFind({ table.rows.drop(ROW_PREVIEW).flatten().flatMap { it.blocks } }) { showAll = true }
     val rows = if (showAll) table.rows else table.rows.take(ROW_PREVIEW)
     val grid = remember(rows) { TableGrid.of(rows) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.testTag("table")) {
