@@ -51,9 +51,7 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
@@ -122,16 +120,12 @@ fun SettingsScreen(
             .testTag("settings"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalIconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                    onBack()
-                },
-                shapes = IconButtonDefaults.shapes(),
+            BreathingScallopButton(
+                icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = "Back",
+                onClick = onBack,
                 modifier = Modifier.testTag("settings_back"),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-            }
+            )
             Spacer(Modifier.width(16.dp))
             Text("Settings", style = MaterialTheme.typography.headlineMediumEmphasized)
         }
@@ -374,12 +368,33 @@ private fun OpenIcon() {
  */
 @Composable
 fun SettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val loop = rememberInfiniteTransition(label = "settingsLoop")
-    val spin by loop.animateFloat(0f, 360f, infiniteRepeatable(tween(16_000, easing = LinearEasing)), label = "settingsSpin")
+    BreathingScallopButton(
+        icon = Icons.Rounded.Settings,
+        contentDescription = "Settings",
+        onClick = onClick,
+        modifier = modifier.testTag("settings_button"),
+        counterRotateIcon = true,
+    )
+}
+
+/**
+ * A small scallop that keeps turning and breathes between two cookie shapes, squishing when
+ * pressed and kicking round with a spring when tapped.
+ */
+@Composable
+private fun BreathingScallopButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    counterRotateIcon: Boolean = false,
+) {
+    val loop = rememberInfiniteTransition(label = "scallopLoop")
+    val spin by loop.animateFloat(0f, 360f, infiniteRepeatable(tween(16_000, easing = LinearEasing)), label = "scallopSpin")
     val morphProgress by loop.animateFloat(
         0f, 1f,
         infiniteRepeatable(tween(2_600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "settingsMorph",
+        label = "scallopMorph",
     )
     val morph = remember { Morph(MaterialShapes.Cookie9Sided, MaterialShapes.Cookie12Sided) }
     val kick = remember { Animatable(0f) }
@@ -396,8 +411,7 @@ fun SettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 scope.launch { kick.animateTo(kick.value + 120f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
                 onClick()
             }
-            .semantics { contentDescription = "Settings" }
-            .testTag("settings_button"),
+            .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -411,10 +425,12 @@ fun SettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 )
         )
         Icon(
-            Icons.Rounded.Settings,
+            icon,
             contentDescription = null,
             tint = colors.onSecondaryContainer,
-            modifier = Modifier.size(22.dp).graphicsLayer { rotationZ = -kick.value * 0.5f },
+            modifier = Modifier
+                .size(22.dp)
+                .then(if (counterRotateIcon) Modifier.graphicsLayer { rotationZ = -kick.value * 0.5f } else Modifier),
         )
     }
 }
