@@ -185,3 +185,76 @@ private class GlassNode(
     }
 }
 
+/**
+ * Progressive vertical backdrop blur that ramps from zero at the top edge to [blur] at the
+ * bottom, so scrolling content softens gradually without a hard horizontal seam.
+ */
+fun Modifier.progressiveBlur(blur: () -> Dp): Modifier = this then ProgressiveBlurElement(blur)
+
+private const val ProgressiveBlurSteps = 8
+
+private data class ProgressiveBlurElement(
+    val blur: () -> Dp,
+) : ModifierNodeElement<ProgressiveBlurNode>() {
+    override fun create() = ProgressiveBlurNode(blur)
+    override fun update(node: ProgressiveBlurNode) {
+        node.blur = blur
+        node.invalidateDraw()
+    }
+    override fun InspectorInfo.inspectableProperties() {
+        name = "progressiveBlur"
+    }
+}
+
+private class ProgressiveBlurNode(
+    var blur: () -> Dp,
+) : Modifier.Node(), DrawModifierNode {
+    private val nodes = arrayOfNulls<RenderNode>(ProgressiveBlurSteps)
+    private var lastBlurPx = -1f
+
+    override fun onDetach() {
+        for (i in nodes.indices) {
+            nodes[i]?.discardDisplayList()
+            nodes[i] = null
+        }
+        lastBlurPx = -1f
+    }
+
+    @SuppressLint("NewApi")
+    override fun ContentDrawScope.draw() {
+        val target = drawContext.canvas.nativeCanvas
+        val maxBlurPx = blur().toPx().coerceAtLeast(0f)
+        if (!GlassSupported || target !is RecordingCanvas || size.isEmpty() || maxBlurPx < 0.5f) {
+            drawContent()
+            return
+        }
+
+        val w = size.width.roundToInt()
+        val h = size.height.roundToInt()
+        val blurChanged = maxBlurPx != lastBlurPx
+        if (blurChanged) lastBlurPx = maxBlurPx
+
+        for (i in 0 until ProgressiveBlurSteps) {
+            val frac = (i + 1).toFloat() / ProgressiveBlurSteps
+            val top = ((i.toFloat() / ProgressiveBlurSteps) * 0.72f * h).roundToInt()
+            val bandH = (h - top).coerceAtLeast(1)
+            val rn = nodes[i] ?: RenderNode("progressiveBlur_$i").also { nodes[i] = it }
+            rn.setPosition(0, top, w, h)
+            rn.clipToBounds = true
+            rn.alpha = frac
+            if (blurChanged) {
+                val stepBlur = maxBlurPx * frac
+                rn.setBackdropRenderEffect(
+                    if (stepBlur < 0.5f) null
+                    else RenderEffect.createBlurEffect(stepBlur, stepBlur, Shader.TileMode.CLAMP)
+                )
+            }
+            // Record an empty display list so the node participates in the backdrop pass.
+            rn.beginRecording(w, bandH)
+            rn.endRecording()
+            target.drawRenderNode(rn)
+        }
+        drawContent()
+    }
+}
+

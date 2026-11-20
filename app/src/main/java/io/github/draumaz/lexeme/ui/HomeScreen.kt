@@ -7,6 +7,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -61,6 +62,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -73,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
 import io.github.draumaz.lexeme.ui.components.morphBackground
 import io.github.draumaz.lexeme.ui.components.glass
+import io.github.draumaz.lexeme.ui.components.progressiveBlur
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
 import io.github.draumaz.lexeme.ui.components.rememberSpin
@@ -147,11 +151,17 @@ fun HomeScreen(
 
     /** A pane's content, scrolling if it must but otherwise centred in the room it has. */
     @Composable
-    fun Centered(topPad: androidx.compose.ui.unit.Dp, bottomPad: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
+    fun Centered(
+        topPad: androidx.compose.ui.unit.Dp,
+        bottomPad: androidx.compose.ui.unit.Dp,
+        bottomBlur: Boolean = false,
+        content: @Composable () -> Unit,
+    ) {
+        val scrollState = rememberScrollState()
         BoxWithConstraints(Modifier.fillMaxSize()) {
             Column(
                 Modifier
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .heightIn(min = maxHeight)
                     .fillMaxWidth()
                     .padding(top = topPad, bottom = bottomPad)
@@ -159,12 +169,39 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) { content() }
+
+            if (bottomBlur) {
+                val blurFraction by animateFloatAsState(
+                    targetValue = if (scrollState.canScrollForward) 1f else 0f,
+                    animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+                    label = "bottomBlur",
+                )
+                val surface = MaterialTheme.colorScheme.surface
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(bottomPad)
+                        .progressiveBlur { 12.dp * blurFraction }
+                        .drawBehind {
+                            if (blurFraction > 0f) {
+                                drawRect(
+                                    Brush.verticalGradient(
+                                        0f to surface.copy(alpha = 0f),
+                                        0.45f to surface.copy(alpha = 0.5f * blurFraction),
+                                        1f to surface.copy(alpha = 0.9f * blurFraction),
+                                    )
+                                )
+                            }
+                        }
+                )
+            }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         if (split == null) {
-            Centered(top + 24.dp, bottom + 124.dp) {
+            Centered(top + 24.dp, bottom + 124.dp, bottomBlur = true) {
                 Hero()
                 Spacer(Modifier.height(36.dp))
                 Words()
@@ -176,7 +213,7 @@ fun HomeScreen(
             Panes(
                 split,
                 start = { Centered(top + 24.dp, split.startBottomInset(bottom) + 24.dp) { Hero() } },
-                end = { Centered(split.endTopInset(top) + if (split.stacked) 24.dp else 72.dp, bottom + 124.dp) { Words() } },
+                end = { Centered(split.endTopInset(top) + if (split.stacked) 24.dp else 72.dp, bottom + 124.dp, bottomBlur = true) { Words() } },
             )
         }
         SettingsButton(
