@@ -71,9 +71,28 @@ private const val LIST_PREVIEW = 40
 
 @Composable
 fun BlockList(blocks: List<Block>, modifier: Modifier = Modifier, spacing: Int = 10) {
+    val shown = androidx.compose.runtime.remember(blocks) { mergeGalleries(blocks) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(spacing.dp)) {
-        for (block in blocks) BlockView(block)
+        for (block in shown) BlockView(block)
     }
+}
+
+/**
+ * Wiktionary floats each picture on its own, so runs of them arrive as separate galleries;
+ * joined, they share one strip of cards instead of stacking down the page.
+ */
+internal fun mergeGalleries(blocks: List<Block>): List<Block> {
+    if (blocks.count { it is Block.Images } < 2) return blocks
+    val out = ArrayList<Block>(blocks.size)
+    for (block in blocks) {
+        val last = out.lastOrNull()
+        if (block is Block.Images && last is Block.Images) {
+            out[out.lastIndex] = Block.Images(last.images + block.images)
+        } else {
+            out += block
+        }
+    }
+    return out
 }
 
 @Composable

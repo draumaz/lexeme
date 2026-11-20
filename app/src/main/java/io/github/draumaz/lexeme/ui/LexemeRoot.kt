@@ -76,6 +76,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import io.github.draumaz.lexeme.ui.blocks.ImageViewerHost
+import io.github.draumaz.lexeme.ui.blocks.ImageViewerState
+import io.github.draumaz.lexeme.ui.blocks.LocalImageViewer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.TransformOrigin
@@ -291,6 +294,7 @@ fun LexemeRoot(
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentPadding = PaddingValues(top = top + 16.dp, bottom = bottom + 112.dp)
     val current = pages.lastOrNull()
+    val imageViewer = remember { ImageViewerState() }
     // Two panes on tablets and across a dual-screen hinge: the search bar heads the start pane,
     // and the reading, its toolbar, docked search and settings all live in the end pane.
     val split = rememberPaneSplit()
@@ -304,6 +308,7 @@ fun LexemeRoot(
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
         LocalPaneSplit provides split,
         LocalSpinPaused provides spinPaused,
+        LocalImageViewer provides imageViewer,
     ) {
         SharedTransitionLayout {
         Box(
@@ -625,6 +630,9 @@ fun LexemeRoot(
                     onBack = { settingsOpen = false },
                 )
             }
+
+            // A tapped picture flies out of its card to full size, over both panes.
+            ImageViewerHost(imageViewer)
         }
         }
     }

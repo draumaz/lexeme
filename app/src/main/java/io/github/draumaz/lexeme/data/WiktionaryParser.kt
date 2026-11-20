@@ -298,6 +298,7 @@ object WiktionaryParser {
                 })
                 tag == "hr" -> emptyList()
                 "etytree" in cls -> etymologyTree(el)
+                "picdic-box" in cls -> pictureDictionary(el)
                 "NavFrame" in cls -> navFrame(el)
                 "inflection-table-wrapper" in cls -> inflectionWrapper(el)
                 else -> blocksOf(el.childNodes())
@@ -485,6 +486,21 @@ object WiktionaryParser {
             return EtymologyBranch(sources, chain)
         }
 
+        /**
+         * A picture dictionary ({{picdic}}): a lead picture and a box of small linked thumbnails,
+         * each laid out in its own little table. Flattened into one gallery, each picture
+         * captioned with the word it shows and fetched big enough to fill a carousel card.
+         */
+        private fun pictureDictionary(el: Element): List<Block> {
+            val images = el.select("figure").mapNotNull { fig ->
+                val img = fig.selectFirst("img") ?: return@mapNotNull null
+                val caption = rich(fig.selectFirst("figcaption"))?.takeUnless { it.isBlank }
+                    ?: rich(fig.parent()?.children()?.firstOrNull { it.normalName() == "span" })?.takeUnless { it.isBlank }
+                imageOf(img, caption)?.let { sharper(it, img) }
+            }
+            return if (images.isEmpty()) emptyList() else listOf(Block.Images(images))
+        }
+
         private fun media(el: Element): List<Block> {
             el.selectFirst("audio")?.let { return listOfNotNull(audio(it, "Audio")) }
             val caption = rich(el.selectFirst("figcaption, .thumbcaption"))?.takeUnless { it.isBlank }
@@ -532,6 +548,24 @@ object WiktionaryParser {
             it.hasClass("mw-invert") || it.hasClass("skin-invert") || it.hasClass("skin-invert-image")
         }
         return Image(url, w, h, caption, invert)
+    }
+
+    /**
+     * Width picture-dictionary thumbnails are refetched at: tiny inline, they'd blur in a carousel.
+     * Wikimedia only serves its standard thumbnail widths, and 500 is one.
+     */
+    private const val SharpWidth = 500
+
+    private val ThumbWidth = Regex("/(\\d+)px-")
+
+    /** A thumbnail refetched [SharpWidth] wide, or the original file if that's smaller, keeping its shape. */
+    internal fun sharper(image: Image, img: Element): Image {
+        val fileWidth = img.attr("data-file-width").toIntOrNull() ?: return image
+        if (image.width <= 0 || image.height <= 0 || "/thumb/" !in image.url) return image
+        if (fileWidth <= image.width) return image
+        val width = minOf(SharpWidth, fileWidth)
+        val url = if (fileWidth <= SharpWidth) originalOf(image.url) else ThumbWidth.replace(image.url) { "/${width}px-" }
+        return image.copy(url = url, width = width, height = image.height * width / image.width)
     }
 
     private val ThumbUrl = Regex("^https://(?:thumb|upload)\\.wikimedia\\.org/(.+?)/thumb/(.+)/[^/]+$")
