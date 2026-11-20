@@ -2,6 +2,7 @@ package io.github.draumaz.lexeme.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
@@ -21,17 +22,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -60,9 +68,10 @@ internal class OutlineSection(val section: Section, val row: Int)
 private const val OverviewLeadingRows = 2
 
 /**
- * The start pane on two-pane layouts: the word, then the page's contents. The language being
- * read opens into its sections, the one under the reading line highlighted, and any of them
- * can be tapped to jump the reading pane there. It follows along as the reading pane scrolls.
+ * The start pane on two-pane layouts: the word, then the page's contents. Each language is a
+ * card that starts folded and opens into its sections, the one under the reading line
+ * highlighted; any of them can be tapped to jump the reading pane there. The language being
+ * read is lit up, and the list follows along as the reading pane scrolls.
  */
 @Composable
 internal fun EntryOverview(
@@ -142,6 +151,10 @@ private fun OverviewLanguage(
     val lang = language.lang
     val hue = hueFor(lang.name)
     val spin by rememberSpin(20_000)
+    // Folded to start, as on the phone; tapping the language opens it and jumps there.
+    var expanded by rememberSaveable(lang.id, language.index) { mutableStateOf(false) }
+    val chevron by animateFloatAsState(if (expanded) 0f else -90f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "overviewChevron")
+    val hasSections = language.sections.isNotEmpty()
     val card by animateColorAsState(
         if (selected) colors.surfaceContainer else Color.Transparent,
         MaterialTheme.motionScheme.defaultEffectsSpec(),
@@ -159,13 +172,14 @@ private fun OverviewLanguage(
             Surface(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    expanded = true
                     onJump(language.headerRow)
                 },
                 shape = RoundedCornerShape(28.dp),
                 color = Color.Transparent,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     ShapeBadge(badgeShape(language.index), hue.container, size = 40.dp, rotation = { spin + language.index * 37f }) {
                         Text(initials(lang.name), style = MaterialTheme.typography.labelLarge, color = hue.content)
                     }
@@ -183,10 +197,26 @@ private fun OverviewLanguage(
                             )
                         }
                     }
+                    if (hasSections) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(if (expanded) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn)
+                                expanded = !expanded
+                            },
+                            modifier = Modifier.testTag("overview_toggle_${language.index}"),
+                        ) {
+                            Icon(
+                                Icons.Rounded.ExpandMore,
+                                contentDescription = if (expanded) "Collapse ${lang.name}" else "Expand ${lang.name}",
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.graphicsLayer { rotationZ = chevron },
+                            )
+                        }
+                    }
                 }
             }
             AnimatedVisibility(
-                selected && language.sections.isNotEmpty(),
+                expanded && hasSections,
                 enter = expandVertically(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
                 exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
             ) {
