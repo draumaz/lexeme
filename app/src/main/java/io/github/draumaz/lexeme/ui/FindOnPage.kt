@@ -133,10 +133,8 @@ fun FindBar(
             .testTag("find_bar"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                ShapeBadge(MaterialShapes.Cookie9Sided, colors.tertiary, size = 34.dp) {
-                    Icon(Icons.Rounded.FindInPage, null, Modifier.size(18.dp), tint = colors.onTertiary)
-                }
+            IconButton(onClick = onClose, modifier = Modifier.testTag("find_close")) {
+                Icon(Icons.Rounded.Close, contentDescription = "Close find")
             }
             Spacer(Modifier.width(4.dp))
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
@@ -197,8 +195,10 @@ fun FindBar(
                     }
                 }
             }
-            IconButton(onClick = onClose, modifier = Modifier.testTag("find_close")) {
-                Icon(Icons.Rounded.Close, contentDescription = "Close find")
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                ShapeBadge(MaterialShapes.Cookie9Sided, colors.tertiary, size = 34.dp) {
+                    Icon(Icons.Rounded.FindInPage, null, Modifier.size(18.dp), tint = colors.onTertiary)
+                }
             }
         }
     }

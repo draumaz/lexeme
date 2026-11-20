@@ -140,11 +140,8 @@ fun SearchBar(
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     } else {
-                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                            ShapeBadge(MaterialShapes.Cookie9Sided, colors.primary, size = 34.dp) {
-                                Icon(Icons.Rounded.Search, null, Modifier.size(18.dp), tint = colors.onPrimary)
-                            }
-                        }
+                        // No way back yet: the text starts near the edge, the badge sits at the end.
+                        Spacer(Modifier.width(14.dp))
                     }
                 }
                 Spacer(Modifier.width(4.dp))
@@ -189,6 +186,12 @@ fun SearchBar(
                 ) {
                     IconButton(onClick = { setText("") }, modifier = Modifier.testTag("clear_button")) {
                         Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                    }
+                }
+                // The scallop sits at the end, as in the find bar.
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    ShapeBadge(MaterialShapes.Cookie9Sided, colors.primary, size = 34.dp) {
+                        Icon(Icons.Rounded.Search, null, Modifier.size(18.dp), tint = colors.onPrimary)
                     }
                 }
             }
