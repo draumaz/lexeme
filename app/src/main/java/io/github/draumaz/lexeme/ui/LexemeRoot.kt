@@ -1,5 +1,8 @@
 package io.github.draumaz.lexeme.ui
 
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,7 +48,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.FindInPage
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -500,7 +502,7 @@ fun LexemeRoot(
             }
 
             // One rotating search scallop, bottom centre on every screen. On entries the actions
-            // (home and share) sit in see-through circles either side of it, and tuck into it while reading down.
+            // (back and share) sit in see-through circles either side of it, and tuck into it while reading down.
             AnimatedVisibility(
                 visible = !focused && !dockedSearch && !find.open && !scallopHidden,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -591,14 +593,23 @@ fun LexemeRoot(
                             boundsTransform = SearchMorphBounds,
                         ),
                     )
-                    // Home and share sit as matching scallops the same distance either side of the scallop.
+                    // Back and share sit as matching scallops the same distance either side of the scallop.
+                    // One page deep, back is home, so it says so; deeper, it pops a page and a long
+                    // press goes straight home.
+                    val deep = pages.size > 1
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                             ToolbarPill(pillsShown, towardEnd = true, tag = "toolbar") {
-                                ScallopButton(Icons.Rounded.Home, "Home", modifier = Modifier.testTag("toolbar_home")) { vm.home() }
+                                ScallopButton(
+                                    if (deep) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Home,
+                                    if (deep) "Back" else "Home",
+                                    modifier = Modifier.testTag("toolbar_back"),
+                                    onLongClick = if (deep) ({ vm.home() }) else null,
+                                    longClickLabel = if (deep) "Home" else null,
+                                ) { vm.back() }
                             }
                         }
                         Spacer(Modifier.width(SearchFabSize + 16.dp))
@@ -686,6 +697,9 @@ private fun ScallopButton(
     description: String,
     modifier: Modifier = Modifier,
     size: Dp = 60.dp,
+    /** An optional second action on long press, announced to TalkBack as [longClickLabel]. */
+    onLongClick: (() -> Unit)? = null,
+    longClickLabel: String? = null,
     onClick: () -> Unit,
 ) {
     val idleRotation by rememberSpin(-11_000)
@@ -698,7 +712,20 @@ private fun ScallopButton(
         modifier
             .size(size)
             .pressScale(interaction, 0.86f)
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onLongClickLabel = longClickLabel,
+                onLongClick = onLongClick?.let { long ->
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        // A full turn the other way, so a long press feels different from a tap.
+                        scope.launch { kick.animateTo(kick.value + 360f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)) }
+                        long()
+                    }
+                },
+            ) {
                 haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                 scope.launch { kick.animateTo(kick.value - 120f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
                 onClick()
@@ -712,12 +739,19 @@ private fun ScallopButton(
                 .graphicsLayer { rotationZ = idleRotation + kick.value }
                 .toolbarGlass(shape)
         )
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(size * 0.42f))
+        // Icons that change (back turning into home) swap with a quick scale and fade.
+        AnimatedContent(
+            icon,
+            transitionSpec = { (scaleIn(initialScale = 0.6f) + fadeIn()) togetherWith (scaleOut(targetScale = 0.6f) + fadeOut()) },
+            label = "scallopIcon",
+        ) { shown ->
+            Icon(shown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(size * 0.42f))
+        }
     }
 }
 
 /**
- * The glass for the controls around the search scallop (home, share and up-one-language). They keep
+ * The glass for the controls around the search scallop (back, share and up-one-language). They keep
  * their surfaceContainerHighest tone, more heavily than the scallop keeps its tint: their icons
  * are plain onSurface, so the page behind should glow through rather than compete. Before
  * Android 17 QPR2 they keep the see-through fill they always had.

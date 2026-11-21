@@ -66,7 +66,8 @@ Entries also include:
 - The search field opens above the keyboard. Suggestions appear as you type, and Enter opens the
   highlighted suggestion.
 - The search button sits at the bottom of every screen and expands into the search field when tapped.
-  On entry pages it is flanked by home and share, and once you are a screen or more down the page
+  On entry pages it is flanked by back and share. Back shows as home on the first page, and from
+  deeper pages a long press goes straight home. Once you are a screen or more down the page,
   a button above it jumps up one language section. These buttons hide while scrolling down and
   reappear when scrolling up.
 - Back navigation supports the predictive back gesture and restores the previous scroll position.
