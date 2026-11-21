@@ -116,12 +116,12 @@ val GoogleSansFlex = FontFamily(
     }
 )
 
-/** The "Lexeme" wordmark alone keeps the bookish serif: Noto Serif Light, subset to just the letters it uses. */
+/** The "Lexeme" wordmark alone keeps the bookish serif: Noto Serif a touch under Light (250), subset to just the letters it uses. */
 val Wordmark = FontFamily(
     Font(
         R.font.noto_serif_wordmark,
         FontWeight.Light,
-        variationSettings = FontVariation.Settings(FontVariation.weight(300)),
+        variationSettings = FontVariation.Settings(FontVariation.weight(250)),
     )
 )
 
