@@ -1,5 +1,7 @@
 package io.github.draumaz.lexeme.ui
 
+import io.github.draumaz.lexeme.ui.components.NamespaceLabel
+import io.github.draumaz.lexeme.data.titleParts
 import android.os.SystemClock
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -207,7 +209,7 @@ private fun countsLine(category: CategoryPage): String = listOfNotNull(
 private fun CategoryHeader(category: CategoryPage, animate: Boolean, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 16.dp)) {
-        Text("Category", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+        NamespaceLabel(titleParts(category.title), modifier = Modifier.padding(bottom = 2.dp))
         PoppingTitle(
             category.name,
             style = MaterialTheme.typography.displaySmallEmphasized,

@@ -9,6 +9,7 @@ import io.github.draumaz.lexeme.data.CategoryResult
 import io.github.draumaz.lexeme.data.Entry
 import io.github.draumaz.lexeme.data.MemberKind
 import io.github.draumaz.lexeme.data.isCategoryTitle
+import io.github.draumaz.lexeme.data.titleParts
 import io.github.draumaz.lexeme.data.HistoryStore
 import io.github.draumaz.lexeme.data.LookupResult
 import io.github.draumaz.lexeme.data.WiktionaryApi
@@ -45,15 +46,32 @@ sealed interface PageState {
     data class Failed(val message: String) : PageState
 }
 
+/** A namespaced title without its prefix: `Proto-Germanic/watōr`, `English nouns`. */
+private fun bareName(title: String): String = title.substringAfter(':').trim()
+
+/**
+ * Puts titles that really start with [typed] (in full, or by their bare name) ahead of the
+ * search engine's looser matches, keeping each group in its order: with namespaces in play
+ * it can rank a near-miss like `protogermanica` above `Reconstruction:Proto-Germanic/watōr`.
+ */
+internal fun prefixMatchesFirst(typed: String, items: List<String>): List<String> =
+    items.sortedBy { item ->
+        !(item.startsWith(typed, ignoreCase = true) ||
+            (titleParts(item).namespace != null && bareName(item).startsWith(typed, ignoreCase = true)))
+    }
+
 data class Suggestions(val query: String, val items: List<String>) {
     /**
      * What Enter should open for [typed]: an exact match if there is one, so typing a real
-     * word never jumps elsewhere, otherwise the top suggestion. Null if these are stale.
+     * word never jumps elsewhere, then a namespaced page whose bare name matches (typing
+     * `English nouns` opens the category), otherwise the top suggestion. Null if these are stale.
      */
     fun pickFor(typed: String): String? {
         val t = typed.trim()
         if (t.isEmpty() || t != query) return null
-        return items.firstOrNull { it == t } ?: items.firstOrNull()
+        return items.firstOrNull { it == t }
+            ?: items.firstOrNull { item -> titleParts(item).let { it.namespace != null && bareName(item).equals(t, ignoreCase = true) } }
+            ?: items.firstOrNull()
     }
 }
 
@@ -93,7 +111,7 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
         .mapLatest { q ->
             val trimmed = q.trim()
             if (trimmed.isEmpty()) Suggestions("", emptyList()) else try {
-                Suggestions(trimmed, api.suggest(trimmed))
+                Suggestions(trimmed, prefixMatchesFirst(trimmed, api.suggest(trimmed)))
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

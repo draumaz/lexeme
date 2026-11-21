@@ -23,4 +23,24 @@ class SuggestionsTest {
         assertNull(Suggestions("qzx", emptyList()).pickFor("qzx"))
         assertNull(s.pickFor("  "))
     }
+
+    @Test
+    fun bareNamePicksTheNamespacedPage() {
+        val items = listOf("English round hand", "Appendix:English nouns", "Category:English nouns")
+        assertEquals("Appendix:English nouns", Suggestions("English nouns", items).pickFor("English nouns"))
+        val reconstruction = listOf("protogermanica", "Reconstruction:Proto-Germanic/watōr")
+        assertEquals(
+            "Reconstruction:Proto-Germanic/watōr",
+            Suggestions("Proto-Germanic/watōr", reconstruction).pickFor("Proto-Germanic/watōr"),
+        )
+    }
+
+    @Test
+    fun realPrefixMatchesLeadLooseOnes() {
+        assertEquals(
+            listOf("Reconstruction:Proto-Germanic/watōr", "protogermanica", "proto-germânica"),
+            prefixMatchesFirst("Proto-Germanic/wat", listOf("protogermanica", "proto-germânica", "Reconstruction:Proto-Germanic/watōr")),
+        )
+        assertEquals(listOf("cat", "catch", "Catalan"), prefixMatchesFirst("cat", listOf("cat", "catch", "Catalan")))
+    }
 }

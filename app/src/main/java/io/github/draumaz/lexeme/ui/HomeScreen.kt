@@ -1,5 +1,8 @@
 package io.github.draumaz.lexeme.ui
 
+import androidx.compose.material3.LocalContentColor
+import io.github.draumaz.lexeme.ui.components.icon
+import io.github.draumaz.lexeme.data.titleParts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -288,11 +291,23 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
                     .bouncyEnter("$prefix-$word", seen, 5 + index)
                     .testTag("${prefix}_chip_$index"),
             ) {
-                Text(
-                    word,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                )
+                // Namespaced pages read as their name, led by their kind's icon; a
+                // reconstruction keeps its language beside it, since "*watōr" alone is ambiguous.
+                val parts = remember(word) { titleParts(word) }
+                Row(
+                    Modifier.padding(start = if (parts.namespace != null) 14.dp else 18.dp, end = 18.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    parts.namespace?.let { ns ->
+                        Icon(ns.icon, contentDescription = ns.name, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(parts.name, style = MaterialTheme.typography.titleMedium)
+                    parts.language?.let {
+                        Spacer(Modifier.width(6.dp))
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = 0.72f))
+                    }
+                }
             }
         } }
     }

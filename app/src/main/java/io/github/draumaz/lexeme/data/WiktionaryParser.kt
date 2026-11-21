@@ -226,16 +226,36 @@ object WiktionaryParser {
                 return
             }
             val start = b.length
-            for (child in el.childNodes()) {
-                when (child) {
-                    is TextNode -> b.text(child.text())
-                    is Element -> inline(child, b)
+            val link = if (el.normalName() == "a") linkOf(el) else null
+            val readable = (link as? Link.Wiki)?.let { readableLinkText(el, it) }
+            if (readable != null) {
+                b.text(readable)
+            } else {
+                for (child in el.childNodes()) {
+                    when (child) {
+                        is TextNode -> b.text(child.text())
+                        is Element -> inline(child, b)
+                    }
                 }
             }
             val end = b.length
             if (end <= start) return
             for (style in stylesOf(el)) b.span(start, end, style)
-            if (el.normalName() == "a") linkOf(el)?.let { b.span(start, end, SpanStyleKind.Link, it) }
+            link?.let { b.span(start, end, SpanStyleKind.Link, it) }
+        }
+
+        /**
+         * A link whose text is just its raw namespaced target (`Category:English noun forms`)
+         * reads as the page's name instead (`English noun forms`, `Proto-Germanic *watōr`).
+         * Links with wording of their own keep it, and appendix links keep their prefix: an
+         * appendix usually shares its name with a category ("see Appendix:English nouns" on
+         * Category:English nouns), so the bare name would read as a link to the page itself.
+         */
+        private fun readableLinkText(a: Element, link: Link.Wiki): String? {
+            val parts = titleParts(link.title)
+            if (parts.namespace == null || parts.namespace == Namespace.Appendix) return null
+            val shown = a.text().trim().replace('_', ' ')
+            return if (shown.equals(link.title, ignoreCase = true)) parts.inline else null
         }
 
         private fun stylesOf(el: Element): List<SpanStyleKind> {

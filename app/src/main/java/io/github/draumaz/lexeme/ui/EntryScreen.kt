@@ -1,5 +1,8 @@
 package io.github.draumaz.lexeme.ui
 
+import io.github.draumaz.lexeme.data.Namespace
+import io.github.draumaz.lexeme.ui.components.NamespaceLabel
+import io.github.draumaz.lexeme.data.titleParts
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInVertically
@@ -176,12 +179,15 @@ fun PageScreen(
 /** The start pane while a page loads or fails: just the word, where its title will land. */
 @Composable
 private fun PendingOverview(title: String, contentPadding: PaddingValues) {
-    Text(
-        title,
-        style = MaterialTheme.typography.displayMediumEmphasized,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = contentPadding.calculateTopPadding()).padding(horizontal = 24.dp).padding(top = 8.dp),
-    )
+    val parts = remember(title) { titleParts(title) }
+    Column(Modifier.padding(top = contentPadding.calculateTopPadding()).padding(horizontal = 24.dp).padding(top = 8.dp)) {
+        NamespaceLabel(parts, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            parts.name,
+            style = MaterialTheme.typography.displayMediumEmphasized,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -198,7 +204,7 @@ private fun LoadingView(title: String, contentPadding: PaddingValues) {
     CenteredStatus(contentPadding) {
         ContainedLoadingIndicator(Modifier.size(96.dp).testTag("loading"))
         Text(
-            "Looking up “$title”",
+            "Looking up “${titleParts(title).name}”",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -661,9 +667,13 @@ private fun outlineOf(entry: Entry, rows: List<EntryRow>): List<OutlineLanguage>
 @Composable
 internal fun EntryTitle(entry: Entry, animate: Boolean, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
+    // Appendix, Thesaurus and Reconstruction pages lead with what kind of page they are, then
+    // the bare name: "Reconstruction · Proto-Germanic" over "*watōr".
+    val parts = remember(entry.title) { titleParts(entry.title) }
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 12.dp)) {
+        NamespaceLabel(parts, modifier = Modifier.padding(bottom = 2.dp))
         PoppingTitle(
-            entry.title,
+            parts.name,
             style = MaterialTheme.typography.displayMediumEmphasized,
             color = colors.onSurface,
             animate = animate,
@@ -671,8 +681,10 @@ internal fun EntryTitle(entry: Entry, animate: Boolean, modifier: Modifier = Mod
         )
         Spacer(Modifier.height(6.dp))
         val n = entry.languages.size
+        // An appendix's top-level headings are its own topics, not languages.
+        val unit = if (parts.namespace == Namespace.Appendix) "section" else "language"
         Text(
-            if (n == 1) "1 language" else "$n languages",
+            if (n == 1) "1 $unit" else "$n ${unit}s",
             style = MaterialTheme.typography.labelLarge,
             color = colors.primary,
         )

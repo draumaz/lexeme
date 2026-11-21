@@ -1,5 +1,7 @@
 package io.github.draumaz.lexeme.ui
 
+import io.github.draumaz.lexeme.ui.components.icon
+import io.github.draumaz.lexeme.data.titleParts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -242,24 +244,36 @@ fun SearchBar(
                                 .testTag(if (highlighted) "suggestion_${index}_picked" else "suggestion_$index"),
                         ) {
                             Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val parts = remember(item) { titleParts(item) }
                                 Icon(
                                     when {
                                         showingRecent -> Icons.Rounded.History
                                         highlighted -> Icons.AutoMirrored.Rounded.KeyboardReturn
-                                        else -> Icons.Rounded.Search
+                                        else -> parts.namespace?.icon ?: Icons.Rounded.Search
                                     },
                                     contentDescription = if (highlighted) "Enter opens this" else null,
                                     tint = if (highlighted) colors.onSecondaryContainer else colors.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp),
                                 )
                                 Spacer(Modifier.width(16.dp))
-                                Text(
-                                    item,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                // Namespaced pages read as their bare name, with the kind of page under it.
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        parts.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    parts.label?.let {
+                                        Text(
+                                            it,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (highlighted) colors.onSecondaryContainer else colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
                                 IconButton(onClick = { setText(item) }, modifier = Modifier.size(32.dp)) {
                                     Icon(if (fromBottom) Icons.Rounded.SouthWest else Icons.Rounded.NorthWest, contentDescription = "Fill in $item", tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                 }

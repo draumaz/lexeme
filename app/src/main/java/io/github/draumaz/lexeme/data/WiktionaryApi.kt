@@ -45,6 +45,9 @@ enum class MemberKind(internal val apiName: String) { Subcategories("subcat"), P
 /** A parsed page: its resolved title, HTML, and visible categories. */
 private class Parsed(val title: String, val html: String, val categories: List<String>)
 
+/** Main entries plus every [Namespace], as `opensearch` wants them. */
+private val SuggestNamespaces = (listOf(0) + Namespace.entries.map { it.id }).joinToString("|")
+
 class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
 
     private val base = "https://en.wiktionary.org/w/api.php".toHttpUrl()
@@ -172,14 +175,17 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
         return CategoryMembers(titles, next)
     }
 
-    /** Prefix search for the type-ahead list. */
+    /**
+     * Prefix search for the type-ahead list: entries first, then [Namespace] pages, which match
+     * on their bare names as well as on a typed `Category:`-style prefix.
+     */
     suspend fun suggest(prefix: String, limit: Int = 8): List<String> = withContext(Dispatchers.IO) {
         if (prefix.isBlank()) return@withContext emptyList()
         val url = base.newBuilder()
             .addQueryParameter("action", "opensearch")
             .addQueryParameter("format", "json")
             .addQueryParameter("formatversion", "2")
-            .addQueryParameter("namespace", "0")
+            .addQueryParameter("namespace", SuggestNamespaces)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("search", prefix)
             .build()

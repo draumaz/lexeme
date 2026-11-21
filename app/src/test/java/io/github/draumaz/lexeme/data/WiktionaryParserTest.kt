@@ -138,6 +138,21 @@ class WiktionaryParserTest {
     }
 
     @Test
+    fun rawNamespacedLinkTextReadsAsTheName() {
+        val entry = WiktionaryParser.parse(
+            "water",
+            page(h(2, "English") + """<p><a href="/wiki/Category:English_noun_forms">Category:English noun forms</a>; """ +
+                """<a href="/wiki/Reconstruction:Proto-Germanic/wat%C5%8Dr">Reconstruction:Proto-Germanic/watōr</a>; """ +
+                """<a href="/wiki/Appendix:English_nouns">the appendix</a>; """ +
+                """<a href="/wiki/Appendix:English_nouns">Appendix:English nouns</a></p>"""),
+        )
+        val text = (entry.languages[0].intro.single() as Block.Paragraph).text
+        assertEquals("English noun forms; Proto-Germanic *watōr; the appendix; Appendix:English nouns", text.text)
+        val linked = text.spans.filter { it.link != null }.map { text.text.substring(it.start, it.end) }
+        assertEquals(listOf("English noun forms", "Proto-Germanic *watōr", "the appendix", "Appendix:English nouns"), linked)
+    }
+
+    @Test
     fun categoryPageKeepsTrailAndDescriptionDropsClutter() {
         val (trail, blocks) = WiktionaryParser.parseCategory(
             "Category:Russian terms with audio pronunciation",

@@ -186,6 +186,41 @@ sealed interface Link {
 
 const val CategoryPrefix = "Category:"
 
+/**
+ * The namespaces search reaches beyond plain entries, with their MediaWiki ids. Their pages
+ * match on the bare name too, so typing `English nouns` offers `Category:English nouns`.
+ */
+enum class Namespace(val id: Int) {
+    Category(14), Appendix(100), Thesaurus(110), Reconstruction(118);
+
+    val prefix: String get() = "$name:"
+}
+
+/**
+ * A title split for display: its [namespace] (null for a plain entry), the [language] a
+ * reconstruction belongs to, and the [name] to show big. `Reconstruction:Proto-Germanic/watōr`
+ * becomes Reconstruction, Proto-Germanic and `*watōr`, as Wiktionary writes reconstructions.
+ */
+data class TitleParts(val namespace: Namespace?, val language: String?, val name: String) {
+    /** The small line above or beside [name]: `Reconstruction · Proto-Germanic`, or null. */
+    val label: String? get() = namespace?.let { ns -> listOfNotNull(ns.name, language).joinToString(" · ") }
+
+    /** How the title reads inside running text: `English nouns`, or `Proto-Germanic *watōr`. */
+    val inline: String get() = listOfNotNull(language, name).joinToString(" ")
+}
+
+fun titleParts(title: String): TitleParts {
+    val t = title.trim()
+    val ns = Namespace.entries.firstOrNull { t.startsWith(it.prefix, ignoreCase = true) }
+        ?: return TitleParts(null, null, t)
+    val rest = t.substring(ns.prefix.length).trim().replace('_', ' ')
+    if (ns == Namespace.Reconstruction && '/' in rest) {
+        val term = rest.substringAfter('/')
+        return TitleParts(ns, rest.substringBefore('/'), if (term.startsWith('*')) term else "*$term")
+    }
+    return TitleParts(ns, null, rest)
+}
+
 /** Whether [title] names a category page, however the prefix is cased. */
 fun isCategoryTitle(title: String): Boolean = title.trim().startsWith(CategoryPrefix, ignoreCase = true)
 
