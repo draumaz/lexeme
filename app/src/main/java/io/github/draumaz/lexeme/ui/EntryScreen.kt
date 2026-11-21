@@ -142,6 +142,8 @@ fun PageScreen(
     onOpen: (String) -> Unit,
     onRetry: () -> Unit,
     onLoadMore: (MemberKind) -> Unit,
+    /** Reloads a category's pages from a letter (null: from the start). */
+    onJumpToLetter: (String?) -> Unit,
     /** Find on page, while it's open on this page. */
     find: FindState? = null,
 ) {
@@ -165,7 +167,7 @@ fun PageScreen(
         }
         when {
             state is PageState.Loaded -> EntryView(state.entry, page.fragment, listState, seen, contentPadding, find)
-            state is PageState.Category -> CategoryView(state, listState, seen, contentPadding, onLoadMore)
+            state is PageState.Category -> CategoryView(state, listState, seen, contentPadding, onLoadMore, onJumpToLetter)
             split != null -> Panes(
                 split,
                 start = { PendingOverview(page.title, contentPadding) },

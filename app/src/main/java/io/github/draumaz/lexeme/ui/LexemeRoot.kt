@@ -395,6 +395,7 @@ fun LexemeRoot(
                             onOpen = ::submit,
                             onRetry = { vm.retry(page) },
                             onLoadMore = { kind -> vm.loadMore(page.id, kind) },
+                            onJumpToLetter = { letter -> vm.jumpToLetter(page.id, letter) },
                             find = find.takeIf { it.open && isTop },
                         )
                     }
@@ -501,8 +502,9 @@ fun LexemeRoot(
                 )
             }
 
-            // One rotating search scallop, bottom centre on every screen. On entries the actions
-            // (back and share) sit in see-through circles either side of it, and tuck into it while reading down.
+            // One search scallop, bottom centre on every screen (turning only on the landing page). On
+            // pages, back and share sit in see-through circles either side of it whenever it shows;
+            // find and up-one-language above it tuck away while reading down.
             AnimatedVisibility(
                 visible = !focused && !dockedSearch && !find.open && !scallopHidden,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -587,6 +589,7 @@ fun LexemeRoot(
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     SearchFab(
                         onClick = { dockedSearch = true },
+                        spinning = current == null,
                         modifier = Modifier.sharedBounds(
                             rememberSharedContentState(SearchMorphKey),
                             animatedVisibilityScope = this@AnimatedVisibility,
@@ -602,7 +605,7 @@ fun LexemeRoot(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                            ToolbarPill(pillsShown, towardEnd = true, tag = "toolbar") {
+                            ToolbarPill(current != null, towardEnd = true, tag = "toolbar") {
                                 ScallopButton(
                                     if (deep) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Home,
                                     if (deep) "Back" else "Home",
@@ -614,7 +617,7 @@ fun LexemeRoot(
                         }
                         Spacer(Modifier.width(SearchFabSize + 16.dp))
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            ToolbarPill(pillsShown, towardEnd = false, tag = "toolbar_end") {
+                            ToolbarPill(current != null, towardEnd = false, tag = "toolbar_end") {
                                 ScallopButton(Icons.Rounded.Share, "Share", modifier = Modifier.testTag("toolbar_share")) { share(wiktionaryUrl(title)) }
                             }
                         }
@@ -686,9 +689,9 @@ private fun ToolbarPill(visible: Boolean, towardEnd: Boolean, tag: String, conte
 }
 
 /**
- * A small version of the search scallop for the controls around it: a slowly turning cookie
- * in the same frosted glass that squishes when pressed and kicks round when tapped. It turns
- * the other way to the search scallop, a little faster, so the group doesn't spin in lockstep.
+ * A small version of the search scallop for the controls around it: a cookie in the same
+ * frosted glass that squishes when pressed and kicks round when tapped. Unlike the scallop on
+ * the landing page it doesn't idly turn.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -702,7 +705,6 @@ private fun ScallopButton(
     longClickLabel: String? = null,
     onClick: () -> Unit,
 ) {
-    val idleRotation by rememberSpin(-11_000)
     val kick = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
@@ -736,7 +738,8 @@ private fun ScallopButton(
         Box(
             Modifier
                 .matchParentSize()
-                .graphicsLayer { rotationZ = idleRotation + kick.value }
+                // No idle turn: these only show on pages, where it would distract from reading.
+                .graphicsLayer { rotationZ = kick.value }
                 .toolbarGlass(shape)
         )
         // Icons that change (back turning into home) swap with a quick scale and fade.

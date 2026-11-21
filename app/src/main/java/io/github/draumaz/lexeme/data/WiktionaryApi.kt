@@ -152,10 +152,18 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
     suspend fun categoryMembers(title: String, kind: MemberKind, from: String?): CategoryMembers =
         withContext(Dispatchers.IO) { fetchMembers(title, kind, from) }
 
+    /**
+     * The first batch of [kind] members of [title] from the letter (or any sort-key prefix)
+     * [letter] on, or from the very start when it's null. Wiktionary sorts case- and
+     * accent-insensitively, so `M` lands on "'m", "m", "M", "m." and onward.
+     */
+    suspend fun categoryMembersFrom(title: String, kind: MemberKind, letter: String?): CategoryMembers =
+        withContext(Dispatchers.IO) { membersOf(getJson(membersUrl(title, kind, null, letter))) }
+
     private suspend fun fetchMembers(title: String, kind: MemberKind, from: String?): CategoryMembers =
         membersOf(getJson(membersUrl(title, kind, from)))
 
-    private fun membersUrl(title: String, kind: MemberKind, from: String?): HttpUrl = base.newBuilder()
+    private fun membersUrl(title: String, kind: MemberKind, from: String?, startAt: String? = null): HttpUrl = base.newBuilder()
         .addQueryParameter("action", "query")
         .addQueryParameter("format", "json")
         .addQueryParameter("formatversion", "2")
@@ -165,6 +173,7 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
         .addQueryParameter("cmprop", "title")
         .addQueryParameter("cmlimit", MemberBatch.toString())
         .apply { if (from != null) addQueryParameter("cmcontinue", from).addQueryParameter("continue", "-||") }
+        .apply { if (startAt != null) addQueryParameter("cmstartsortkeyprefix", startAt) }
         .build()
 
     private fun membersOf(json: JSONObject): CategoryMembers {

@@ -1,5 +1,20 @@
 package io.github.draumaz.lexeme.ui
 
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.derivedStateOf
+import io.github.draumaz.lexeme.ui.components.letterIndex
+import io.github.draumaz.lexeme.ui.components.alphabetFor
+import io.github.draumaz.lexeme.ui.components.QuickScrollMinPages
+import io.github.draumaz.lexeme.ui.components.AlphabetScrollbar
 import io.github.draumaz.lexeme.ui.components.NamespaceLabel
 import io.github.draumaz.lexeme.data.titleParts
 import android.os.SystemClock
@@ -252,13 +267,20 @@ private fun Breadcrumbs(trail: List<Breadcrumb>) {
 }
 
 @Composable
-private fun SectionLabel(text: String, count: Int, modifier: Modifier = Modifier) {
+private fun SectionLabel(
+    text: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+    end: androidx.compose.ui.unit.Dp = 24.dp,
+    action: (@Composable () -> Unit)? = null,
+) {
     Row(
-        modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 10.dp),
+        modifier.fillMaxWidth().padding(start = 24.dp, end = end, top = 16.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
-        if (count > 0) {
+        action?.invoke()
+        if (action == null && count > 0) {
             Text(Count.format(count), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -286,10 +308,12 @@ internal fun CategoryView(
     seen: MutableSet<Any>,
     contentPadding: PaddingValues,
     onLoadMore: (MemberKind) -> Unit,
+    onJumpToLetter: (String?) -> Unit,
 ) {
     val category = state.category
     val split = LocalPaneSplit.current
     val pages = category.pages
+    val scope = rememberCoroutineScope()
     val subcategories = remember(category.subcategories) {
         category.subcategories.titles.map { it.removePrefix(CategoryPrefix) }
     }
@@ -317,8 +341,57 @@ internal fun CategoryView(
             }
     }
 
+    // The quick-scroll sidebar, for long lists in an alphabet it knows. The alphabet is judged
+    // once per category, from the first batch.
+    val alphabet = remember(category.title) { alphabetFor(pages.titles) }
+    val quickScroll = alphabet != null && category.pageCount >= QuickScrollMinPages
+    // Where the pages start in the list: after the header (on one pane), the description and
+    // the subcategories.
+    val withHeader = split == null
+    val pagesLabel = (if (withHeader) 1 else 0) +
+        (if (category.description.isNotEmpty()) 1 else 0) +
+        (if (subcategories.isNotEmpty()) 2 + (if (category.subcategories.next != null) 1 else 0) else 0)
+    val latestPages by rememberUpdatedState(pages)
+    val latestLabel by rememberUpdatedState(pagesLabel)
+    // The letter of the first page row on screen, which the sidebar highlights.
+    val currentLetter by remember(alphabet) {
+        derivedStateOf {
+            val a = alphabet ?: return@derivedStateOf -1
+            val i = listState.firstVisibleItemIndex - latestLabel - 1
+            latestPages.titles.getOrNull(i.coerceAtLeast(0))?.let { letterIndex(it, a) } ?: -1
+        }
+    }
+    // The sidebar slides in once the pages are reached, clear of the header.
+    val atPages by remember { derivedStateOf { listState.firstVisibleItemIndex >= latestLabel } }
+
+    /**
+     * The loaded page row to scroll to for letter [index], or null when it has to be fetched:
+     * the list starts past it (an earlier jump), or hasn't reached it yet. Only a row really
+     * starting with the letter counts, since strays sort out of place (English nouns opens on
+     * symbols and "Unsupported titles/…"); once everything is loaded, a letter with no pages
+     * goes to the next one that has some.
+     */
+    fun loadedRowFor(index: Int): Int? {
+        val a = alphabet ?: return null
+        val from = category.pagesFrom?.let { a.indexOf(it) } ?: -1
+        if (from > index) return null
+        val letters = pages.titles.map { letterIndex(it, a) }
+        val exact = letters.indexOf(index)
+        if (exact >= 0) return exact
+        if (pages.next != null) return null
+        val before = letters.indexOfLast { it in 0 until index }
+        return letters.withIndex().firstOrNull { (i, l) -> i > before && l > index }?.index
+            ?: pages.titles.lastIndex.takeIf { it >= 0 }
+    }
+
+    // A finished jump brings the freshly loaded pages to the top.
+    LaunchedEffect(state.jumps) {
+        if (state.jumps > 0) listState.scrollToItem(latestLabel)
+    }
+
     @Composable
     fun Reading(top: androidx.compose.ui.unit.Dp, withHeader: Boolean) {
+        Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(top = top, bottom = contentPadding.calculateBottomPadding()),
@@ -363,7 +436,21 @@ internal fun CategoryView(
                 }
             }
             if (pages.titles.isNotEmpty()) {
-                item(key = "pages-label") { SectionLabel("Pages", category.pageCount) }
+                item(key = "pages-label") {
+                    val from = category.pagesFrom
+                    // Clear of the sidebar, which slides in once this label scrolls up.
+                    val end = if (quickScroll) 52.dp else 24.dp
+                    if (from == null) {
+                        SectionLabel("Pages", category.pageCount, end = end)
+                    } else {
+                        // Jumped ahead: say where the list starts, with a way back to the top.
+                        SectionLabel("Pages from $from", category.pageCount, end = end) {
+                            TextButton(onClick = { onJumpToLetter(null) }, modifier = Modifier.testTag("pages_from_start")) {
+                                Text("From the start")
+                            }
+                        }
+                    }
+                }
                 // Keyed by position: a category can list the same title under two sort keys.
                 itemsIndexed(pages.titles, key = { i, _ -> "page-$i" }) { i, title ->
                     val source = remember { MutableInteractionSource() }
@@ -378,7 +465,7 @@ internal fun CategoryView(
                         interactionSource = source,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
+                            .padding(start = 16.dp, end = if (quickScroll) 48.dp else 16.dp)
                             .padding(bottom = 3.dp)
                             .pressScale(source, 0.97f)
                             .bouncyEnter("page-$i", seen, order),
@@ -421,6 +508,28 @@ internal fun CategoryView(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                 )
             }
+        }
+        if (quickScroll && alphabet != null) {
+            AnimatedVisibility(
+                visible = atPages,
+                enter = slideInHorizontally(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
+                exit = slideOutHorizontally(spring(stiffness = Spring.StiffnessMedium)) { it } + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(top = top + 8.dp, bottom = contentPadding.calculateBottomPadding(), end = 4.dp),
+            ) {
+                AlphabetScrollbar(
+                    alphabet = alphabet,
+                    current = currentLetter,
+                    // Letters already loaded scroll live under the finger.
+                    onScrub = { index ->
+                        loadedRowFor(index)?.let { row -> scope.launch { listState.scrollToItem(latestLabel + 1 + row) } }
+                    },
+                    // Ones that aren't are fetched once the finger lifts.
+                    onRelease = { index -> if (loadedRowFor(index) == null) onJumpToLetter(alphabet[index]) },
+                )
+            }
+        }
         }
     }
 

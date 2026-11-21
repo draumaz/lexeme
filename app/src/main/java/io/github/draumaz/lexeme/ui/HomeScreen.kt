@@ -373,12 +373,14 @@ private fun HeroMark(modifier: Modifier = Modifier) {
 
 /**
  * The landing page's search button, after Nickel's add button: a slowly turning scalloped
- * cookie that squishes when pressed and kicks round with a spring when tapped.
+ * cookie that squishes when pressed and kicks round with a spring when tapped. It turns only
+ * while [spinning] (on the landing page); on a page it holds still so it doesn't pull the eye
+ * from the reading, though a tap still kicks it round.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val idleRotation by rememberSpin(14_000)
+fun SearchFab(onClick: () -> Unit, modifier: Modifier = Modifier, spinning: Boolean = true) {
+    val idleRotation by rememberSpin(14_000, running = spinning)
     val kick = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current

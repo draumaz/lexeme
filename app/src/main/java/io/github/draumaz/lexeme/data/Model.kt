@@ -240,6 +240,11 @@ data class CategoryPage(
     val subcategoryCount: Int,
     val subcategories: CategoryMembers,
     val pages: CategoryMembers,
+    /**
+     * The letter [pages] was last jumped to (the quick-scroll sidebar), or null when they run
+     * from the start. Everything before it is skipped until the list goes back to the start.
+     */
+    val pagesFrom: String? = null,
 ) {
     /** The title without its prefix: `Russian lemmas`. */
     val name: String get() = title.removePrefix(CategoryPrefix)

@@ -41,6 +41,8 @@ sealed interface PageState {
         val category: CategoryPage,
         val loading: MemberKind? = null,
         val failed: MemberKind? = null,
+        /** Counts finished letter jumps, so the list knows to bring the pages into view. */
+        val jumps: Int = 0,
     ) : PageState
     data class Missing(val suggestions: List<String>) : PageState
     data class Failed(val message: String) : PageState
@@ -233,6 +235,42 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
                     categoryCache.put(page.title, category)
                     categoryCache.put(category.title, category)
                     page.copy(state = current.copy(category = category, loading = null, failed = null))
+                }
+            } finally {
+                if (moreJobs[pageId] === job) moreJobs.remove(pageId)
+            }
+        }
+        moreJobs[pageId] = job
+    }
+
+    /**
+     * Reloads a category's pages from [letter] on (null: from the start), for the quick-scroll
+     * sidebar when the letter isn't among the pages loaded so far.
+     */
+    fun jumpToLetter(pageId: Long, letter: String?) {
+        val state = _pages.value.firstOrNull { it.id == pageId }?.state as? PageState.Category ?: return
+        replace(pageId) { it.copy(state = state.copy(loading = MemberKind.Pages, failed = null)) }
+        moreJobs.remove(pageId)?.cancel()
+        lateinit var job: Job
+        job = viewModelScope.launch {
+            try {
+                val members = try {
+                    api.categoryMembersFrom(state.category.title, MemberKind.Pages, letter)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                replace(pageId) { page ->
+                    val current = page.state as? PageState.Category ?: return@replace page
+                    if (members == null) {
+                        _messages.trySend("Couldn't reach Wiktionary")
+                        return@replace page.copy(state = current.copy(loading = null))
+                    }
+                    val category = current.category.copy(pages = members, pagesFrom = letter)
+                    categoryCache.put(page.title, category)
+                    categoryCache.put(category.title, category)
+                    page.copy(state = current.copy(category = category, loading = null, failed = null, jumps = current.jumps + 1))
                 }
             } finally {
                 if (moreJobs[pageId] === job) moreJobs.remove(pageId)

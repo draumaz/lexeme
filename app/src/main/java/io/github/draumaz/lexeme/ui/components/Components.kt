@@ -297,12 +297,17 @@ val LocalSpinPaused = staticCompositionLocalOf<State<Boolean>> { mutableStateOf(
  * that overshoots and settles back, like a wheel slammed to a halt. While stopped it requests
  * no frames at all. When the page comes to rest it winds back up to speed rather than jumping
  * straight to it. It honours the system animation scale, and doesn't turn with animations off.
+ *
+ * With [running] false it stops the same way and stays stopped until it's true again; one that
+ * starts out stopped just sits still, with no slam.
  */
 @Composable
-fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Float> {
+fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true, running: Boolean = true): State<Float> {
     val paused = LocalSpinPaused.current
     val angle = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(periodMillis, pausable, paused) {
+    // Whether it has turned at all, so a spin that starts out stopped doesn't slam.
+    val hasTurned = remember { booleanArrayOf(false) }
+    LaunchedEffect(periodMillis, pausable, paused, running) {
         val scale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
         if (scale <= 0f) return@LaunchedEffect
         val degreesPerNano = 360f / (periodMillis * scale * 1_000_000f)
@@ -310,14 +315,13 @@ fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Fl
         var last = -1L
         // When the current wind-up began; the spin reaches full speed SpinUpNanos later.
         var spunUpFrom = -1L
+        if (!running) {
+            if (hasTurned[0]) slamToStop(angle, direction)
+            return@LaunchedEffect
+        }
         while (true) {
             if (pausable && paused.value) {
-                val slam = Animatable(angle.floatValue)
-                slam.animateTo(
-                    angle.floatValue + direction * SlamDegrees,
-                    spring(dampingRatio = 0.32f, stiffness = Spring.StiffnessMediumLow),
-                    initialVelocity = direction * SlamKick,
-                ) { angle.floatValue = value % 360f }
+                slamToStop(angle, direction)
                 snapshotFlow { paused.value }.first { !it }
                 last = -1L
                 spunUpFrom = -1L
@@ -329,12 +333,23 @@ fun rememberSpin(periodMillis: Int = 18_000, pausable: Boolean = true): State<Fl
                     val t = ((now - spunUpFrom) / (SpinUpNanos * scale)).coerceIn(0f, 1f)
                     val speed = t * t * (3f - 2f * t)
                     angle.floatValue = (angle.floatValue + (now - last) * degreesPerNano * speed) % 360f
+                    hasTurned[0] = true
                 }
                 last = now
             }
         }
     }
     return angle
+}
+
+/** Stops a spin with weight: thrown onward past where it was, then sprung back to rest. */
+private suspend fun slamToStop(angle: androidx.compose.runtime.MutableFloatState, direction: Float) {
+    val slam = Animatable(angle.floatValue)
+    slam.animateTo(
+        angle.floatValue + direction * SlamDegrees,
+        spring(dampingRatio = 0.32f, stiffness = Spring.StiffnessMediumLow),
+        initialVelocity = direction * SlamKick,
+    ) { angle.floatValue = value % 360f }
 }
 
 /** How far past its stopping point a slammed spin is thrown before the spring pulls it back. */
