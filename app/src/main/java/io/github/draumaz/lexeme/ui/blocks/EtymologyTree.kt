@@ -251,11 +251,12 @@ private fun Merge(order: Int, content: @Composable () -> Unit) {
         content = content,
         modifier = Modifier.drawWithCache {
             val stroke = 3.dp.toPx()
-            // Limbs are rebuilt only when placement moves their ends (a new ys array).
+            // Limbs are rebuilt only when placement moves their ends.
+            var builtForX = Float.NaN
             var builtFor: FloatArray? = null
             var limbs = emptyList<GrowingPath>()
             onDrawBehind {
-                if (builtFor !== ends.ys) {
+                if (builtForX != ends.x || builtFor == null || !builtFor!!.contentEquals(ends.ys)) {
                     val jx = size.width
                     val jy = size.height / 2
                     limbs = ends.ys.map { y ->
@@ -266,6 +267,7 @@ private fun Merge(order: Int, content: @Composable () -> Unit) {
                             }
                         )
                     }
+                    builtForX = ends.x
                     builtFor = ends.ys
                 }
                 limbs.forEach { it.draw(this, grow.value, colors.bark, stroke) }
@@ -276,6 +278,7 @@ private fun Merge(order: Int, content: @Composable () -> Unit) {
         val joint = 24.dp.roundToPx()
         val loose = Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight)
         val placeables = measurables.map { it.measure(loose) }
+        if (placeables.isEmpty()) return@Layout layout(0, 0) {}
         val width = placeables.maxOf { it.width }
         val height = placeables.sumOf { it.height } + gap * (placeables.size - 1)
         layout(width + joint, height) {

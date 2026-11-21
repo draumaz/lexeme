@@ -208,7 +208,7 @@ private fun ChipList(list: Block.ListBlock) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             visible.forEach { item ->
-                val p = item.single() as Block.Paragraph
+                val p = item.singleOrNull() as? Block.Paragraph ?: return@forEach
                 val target = p.text.spans.firstNotNullOfOrNull { it.link as? Link.Wiki }
                 val source = remember { MutableInteractionSource() }
                 Surface(

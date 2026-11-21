@@ -104,7 +104,7 @@ is useful for checking the parser against changes to Wiktionary's markup.
 - `data/WiktionaryParser.kt` converts `action=parse` HTML into the document model in `data/Model.kt`.
   It handles headword lines, inflection tables, NavFrames, audio, etymology trees and stroke order
   specifically; other content is kept as text.
-- `data/WiktionaryApi.kt` fetches pages (retrying with other capitalizations), search suggestions and random pages.
+- `data/WiktionaryApi.kt` fetches pages (retrying with other capitalizations), and search suggestions.
 - `data/SettingsStore.kt` and `data/HistoryStore.kt` store settings and recent lookups in SharedPreferences.
 - `ui/` contains the Compose UI: `LexemeRoot` (page stack, back handling, toolbar, search fields),
   `EntryScreen`, `HomeScreen`, `SearchBar`, `SettingsScreen`, and `ui/blocks/` with a renderer per block type.

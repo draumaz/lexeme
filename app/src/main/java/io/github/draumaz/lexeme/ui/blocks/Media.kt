@@ -26,11 +26,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -619,29 +617,32 @@ class AudioController(private val context: Context) {
     private fun play(url: String) {
         stop()
         preparing = url
-        player = MediaPlayer().apply {
-            setAudioAttributes(
+        val mp = MediaPlayer()
+        player = mp
+        runCatching {
+            mp.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
-            runCatching {
-                setDataSource(context, url.toUri(), mapOf("User-Agent" to USER_AGENT))
-            }.onFailure {
-                // Not yet assigned to [player], so stop() alone wouldn't free it.
-                release()
-                this@AudioController.stop()
-                return
-            }
-            setOnPreparedListener {
+            mp.setDataSource(context, url.toUri(), mapOf("User-Agent" to USER_AGENT))
+            mp.setOnPreparedListener {
+                if (player !== mp) return@setOnPreparedListener
                 preparing = null
                 playing = url
                 it.start()
             }
-            setOnCompletionListener { this@AudioController.stop() }
-            setOnErrorListener { _, _, _ -> this@AudioController.stop(); true }
-            prepareAsync()
+            mp.setOnCompletionListener {
+                if (player === mp) stop()
+            }
+            mp.setOnErrorListener { _, _, _ ->
+                if (player === mp) stop()
+                true
+            }
+            mp.prepareAsync()
+        }.onFailure {
+            if (player === mp) stop() else mp.release()
         }
     }
 

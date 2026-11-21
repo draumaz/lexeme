@@ -129,6 +129,6 @@ fun RichTextView(
         color = color,
         maxLines = maxLines,
         overflow = if (maxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis,
-        onTextLayout = { layout.value = it },
+        onTextLayout = { if (range != null) layout.value = it },
     )
 }

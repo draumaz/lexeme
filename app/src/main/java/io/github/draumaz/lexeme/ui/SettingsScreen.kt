@@ -348,11 +348,18 @@ private fun RowContent(
     }
 }
 
+private val RowBadgeShapes = listOf(
+    MaterialShapes.Cookie9Sided,
+    MaterialShapes.Clover4Leaf,
+    MaterialShapes.Sunny,
+    MaterialShapes.Cookie6Sided,
+    MaterialShapes.Flower,
+)
+
 /** An icon on an expressive shape; each row gets a different one. */
 @Composable
 private fun RowIcon(icon: ImageVector, badge: Int) {
-    val shapes = remember { listOf(MaterialShapes.Cookie9Sided, MaterialShapes.Clover4Leaf, MaterialShapes.Sunny, MaterialShapes.Cookie6Sided, MaterialShapes.Flower) }
-    ShapeBadge(shapes[badge % shapes.size], MaterialTheme.colorScheme.primaryContainer, size = 40.dp) {
+    ShapeBadge(RowBadgeShapes[badge % RowBadgeShapes.size], MaterialTheme.colorScheme.primaryContainer, size = 40.dp) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
     }
 }

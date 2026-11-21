@@ -1,6 +1,5 @@
 package io.github.draumaz.lexeme.ui
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -12,9 +11,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -42,12 +38,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.TipsAndUpdates
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.toShape
@@ -62,6 +54,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -88,9 +82,7 @@ private val Samples = listOf("serendipity", "water", "Hund", "水", "книга"
 @Composable
 fun HomeScreen(
     recent: List<String>,
-    randomBusy: Boolean,
     onOpen: (String) -> Unit,
-    onRandom: () -> Unit,
     onClearHistory: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -110,65 +102,67 @@ fun HomeScreen(
             style = MaterialTheme.typography.displayMedium.copy(fontFamily = Wordmark, fontWeight = FontWeight.Light),
             modifier = Modifier.bouncyEnter("title", seen, 1),
         )
-        Spacer(Modifier.height(16.dp))
-        val fastSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-        Button(
-            onClick = {
-                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                onRandom()
-            },
-            shapes = ButtonDefaults.shapes(),
-            contentPadding = ButtonDefaults.MediumContentPadding,
-            modifier = Modifier.height(ButtonDefaults.MediumContainerHeight).bouncyEnter("random", seen, 2).testTag("random_button"),
-        ) {
-            AnimatedContent(
-                randomBusy,
-                transitionSpec = {
-                    scaleIn(fastSpec) togetherWith scaleOut(fastSpec)
-                },
-                label = "randomIcon",
-            ) { busy ->
-                if (busy) LoadingIndicator(Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                else Icon(Icons.Rounded.Shuffle, null, Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(10.dp))
-            Text("Surprise me", style = MaterialTheme.typography.titleMedium)
-        }
     }
 
     @Composable
-    fun Words() {
+    fun WordsLabel() {
         if (recent.isNotEmpty()) {
             SectionLabel(Icons.Rounded.History, "Recent", Modifier.bouncyEnter("recentLabel", seen, 4)) {
                 TextButton(onClick = onClearHistory, modifier = Modifier.testTag("clear_history")) { Text("Clear") }
             }
-            WordChips(recent, seen, prefix = "recent", onOpen = onOpen)
         } else {
             SectionLabel(Icons.Rounded.TipsAndUpdates, "Try", Modifier.bouncyEnter("tryLabel", seen, 4)) {}
-            WordChips(Samples, seen, prefix = "try", onOpen = onOpen)
         }
     }
 
-    /** A pane's content, scrolling if it must but otherwise centred in the room it has. */
+    @Composable
+    fun WordsChips() {
+        if (recent.isNotEmpty()) WordChips(recent, seen, prefix = "recent", onOpen = onOpen)
+        else WordChips(Samples, seen, prefix = "try", onOpen = onOpen)
+    }
+
+    @Composable
+    fun Words() {
+        WordsLabel()
+        WordsChips()
+    }
+
+    /**
+     * A pane's content, scrolling if it must but otherwise centred in the room it has. With
+     * [anchored], the content is laid out by [AnchoredHome] instead of plain centring.
+     */
     @Composable
     fun Centered(
         topPad: androidx.compose.ui.unit.Dp,
         bottomPad: androidx.compose.ui.unit.Dp,
         bottomBlur: Boolean = false,
+        anchored: Boolean = false,
         content: @Composable () -> Unit,
     ) {
         val scrollState = rememberScrollState()
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            Column(
-                Modifier
-                    .verticalScroll(scrollState)
-                    .heightIn(min = maxHeight)
-                    .fillMaxWidth()
-                    .padding(top = topPad, bottom = bottomPad)
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) { content() }
+            if (anchored) {
+                AnchoredHome(
+                    room = maxHeight - topPad - bottomPad,
+                    modifier = Modifier
+                        .verticalScroll(scrollState)
+                        .fillMaxWidth()
+                        .padding(top = topPad, bottom = bottomPad)
+                        .padding(horizontal = 24.dp),
+                    content = content,
+                )
+            } else {
+                Column(
+                    Modifier
+                        .verticalScroll(scrollState)
+                        .heightIn(min = maxHeight)
+                        .fillMaxWidth()
+                        .padding(top = topPad, bottom = bottomPad)
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) { content() }
+            }
 
             if (bottomBlur) {
                 val blurFraction by animateFloatAsState(
@@ -201,14 +195,14 @@ fun HomeScreen(
 
     Box(Modifier.fillMaxSize()) {
         if (split == null) {
-            Centered(top + 24.dp, bottom + 124.dp, bottomBlur = true) {
-                Hero()
-                Spacer(Modifier.height(36.dp))
-                Words()
+            Centered(top + 24.dp, bottom + 124.dp, bottomBlur = true, anchored = true) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Hero() }
+                WordsLabel()
+                WordsChips()
             }
         } else {
             // Two panes (a tablet, or the two screens of a dual-screen phone): the mark and
-            // Surprise me on one side (or the top), the words and search scallop on the other.
+            // mark on one side (or the top), the words and search scallop on the other.
             // Side by side, the words clear the settings button above them; stacked, it's on the other screen.
             Panes(
                 split,
@@ -225,9 +219,43 @@ fun HomeScreen(
     }
 }
 
+/**
+ * The phone home screen's layout: the hero (mark and wordmark), then the words'
+ * label and chips. It's centred as if there were only one row of chips, so the hero holds its
+ * place however many recent words there are; further rows run on down, off the screen and
+ * under the bottom blur, for scrolling to. Expects exactly those three children, in that order.
+ */
+@Composable
+private fun AnchoredHome(room: Dp, modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity)
+        val (hero, label, chips) = measurables.map { it.measure(loose) }
+        val gap = HeroWordsGap.roundToPx()
+        val roomPx = room.roundToPx().coerceAtLeast(0)
+        val reference = hero.height + gap + label.height + minOf(chips.height, ChipRowHeight.roundToPx())
+        val heroY = ((roomPx - reference) / 2).coerceAtLeast(0)
+        val labelY = heroY + hero.height + gap
+        val chipsY = labelY + label.height
+        val width = constraints.maxWidth
+        layout(width, maxOf(roomPx, chipsY + chips.height)) {
+            hero.place((width - hero.width) / 2, heroY)
+            label.place((width - label.width) / 2, labelY)
+            chips.place((width - chips.width) / 2, chipsY)
+        }
+    }
+}
+
+/** The space between the wordmark and the words below it. */
+private val HeroWordsGap = 36.dp
+
+/** One row of word chips: a chip's 48dp touch target. */
+private val ChipRowHeight = 48.dp
+
 @Composable
 private fun SectionLabel(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, modifier: Modifier, trailing: @Composable () -> Unit) {
-    Row(modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // As tall as the Clear button whether or not there is one, so Recent and Try measure the
+    // same and the hero above doesn't shift when history is cleared.
+    Row(modifier.padding(bottom = 8.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.titleMediumEmphasized)

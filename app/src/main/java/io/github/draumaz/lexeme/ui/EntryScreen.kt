@@ -78,6 +78,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import io.github.draumaz.lexeme.ui.components.GlassSupported
+import io.github.draumaz.lexeme.ui.components.glass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -371,6 +373,9 @@ private fun findIndexOf(entry: Entry, rows: List<EntryRow>, query: String): Find
  */
 internal val LanguagePickerOffset = 60.dp
 
+/** How much surfaceContainerHigh the language picker's glass keeps: the search scallop's strength. */
+private const val LanguagePickerGlassTint = 0.5f
+
 /** How far below the list's top a language header lands: under the picker, or flush on two panes. */
 internal fun languageScrollOffset(split: PaneSplit?): Dp = if (split != null) 0.dp else LanguagePickerOffset
 
@@ -444,7 +449,7 @@ private fun EntryView(
 
     // Same-page anchors scroll; everything else goes up to the app.
     val outer = LocalLinkHandler.current
-    val handler = remember(entry, outer) {
+    val handler = remember(entry, outer, languageRows, stickyOffset) {
         { link: Link ->
             val fragment = (link as? Link.Wiki)?.takeIf { it.title == entry.title }?.fragment
             val target = if (fragment != null) languageIndexFor(entry, fragment) else -1
@@ -456,11 +461,13 @@ private fun EntryView(
     val needle = find?.needle.orEmpty()
     val findIndex = remember(rows, needle) { if (needle.isEmpty()) FindIndex.Empty else findIndexOf(entry, rows, needle) }
     val currentFindIndex by rememberUpdatedState(findIndex)
-    var listTop by remember { mutableFloatStateOf(0f) }
-    var listTopPad by remember { mutableFloatStateOf(0f) }
-    var findToken by remember { mutableIntStateOf(0) }
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val readingTop = if (split == null) contentPadding.calculateTopPadding() else split.endTopInset(statusTop) + 12.dp
     val density = LocalDensity.current
-    val revealMatch: suspend (Float, Float) -> Boolean = remember(listState, density) {
+    val listTopPad = with(density) { readingTop.toPx() }
+    var listTop by remember { mutableFloatStateOf(0f) }
+    var findToken by remember { mutableIntStateOf(0) }
+    val revealMatch: suspend (Float, Float) -> Boolean = remember(listState, density, find, stickyOffset, listTopPad) {
         { top, bottom ->
             // Let a jump to the row finish first, then nudge the match itself into the clear:
             // below the pinned picker, above the find bar (and the keyboard under it).
@@ -490,7 +497,7 @@ private fun EntryView(
         LaunchedEffect(find.steps) {
             val index = currentFindIndex
             if (index.total == 0) return@LaunchedEffect
-            val row = index.rows[index.rowOf(find.current)]
+            val row = index.rows[index.rowOf(find.current.coerceIn(0, index.total - 1))]
             if (listState.layoutInfo.visibleItemsInfo.none { it.index == row }) {
                 listState.animateScrollToItem(row, -stickyOffset)
             }
@@ -529,7 +536,6 @@ private fun EntryView(
     fun Reading(top: Dp) {
         // The list runs right up to the top of the screen, so the page scrolls up under the
         // status bar instead of being cut off below it; the picker pins itself under the bar.
-        listTopPad = with(density) { top.toPx() }
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(top = top, bottom = contentPadding.calculateBottomPadding()),
@@ -603,7 +609,7 @@ private fun EntryView(
 
     CompositionLocalProvider(LocalLinkHandler provides handler) {
         if (split == null) {
-            Reading(top = contentPadding.calculateTopPadding())
+            Reading(top = readingTop)
         } else {
             val outline = remember(rows) { outlineOf(entry, rows) }
             // The row at the reading line, for the overview's "you are here".
@@ -613,7 +619,6 @@ private fun EntryView(
                     listState.layoutInfo.visibleItemsInfo.lastOrNull { it.offset <= line }?.index ?: listState.firstVisibleItemIndex
                 }
             }
-            val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             Panes(
                 split,
@@ -631,7 +636,7 @@ private fun EntryView(
                         seen = seen,
                     )
                 },
-                end = { Reading(top = split.endTopInset(statusTop) + 12.dp) },
+                end = { Reading(top = readingTop) },
             )
         }
     }
@@ -690,19 +695,31 @@ private fun LanguagePicker(languages: List<LanguageEntry>, selected: Int, onSele
     val colors = MaterialTheme.colorScheme
     val corner by animateDpAsState(if (open) 24.dp else 30.dp, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "pickerCorner")
     val rotation by animateFloatAsState(if (open) 180f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "pickerChevron")
-    val current = languages.getOrNull(selected) ?: return
-    val hue = hueFor(current.name)
+    if (selected !in languages.indices) return
     val spin by rememberSpin(16_000)
     val source = remember { MutableInteractionSource() }
     // Pinned at the very top of the list: clear of the status bar, with nothing painted around
     // the pill, so the page shows through either side of it rather than being cut off.
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = statusTop + 8.dp, bottom = 8.dp)) {
+        val shape = RoundedCornerShape(corner)
+        // Frosted glass, as on the search scallop: the page blurs through its surfaceContainerHigh
+        // tone at the scallop's strength. No shadow on glass, since it would darken through the
+        // tint; before Android 17 QPR2 it keeps its solid fill and its lift when open.
         Surface(
-            shape = RoundedCornerShape(corner),
-            color = colors.surfaceContainerHigh,
-            shadowElevation = if (open) 6.dp else 0.dp,
-            modifier = Modifier.fillMaxWidth().testTag("language_picker"),
+            shape = shape,
+            color = if (GlassSupported) Color.Transparent else colors.surfaceContainerHigh,
+            shadowElevation = if (open && !GlassSupported) 6.dp else 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (GlassSupported) {
+                        Modifier.glass(shape = shape, tint = colors.surfaceContainerHigh.copy(alpha = LanguagePickerGlassTint))
+                    } else {
+                        Modifier
+                    }
+                )
+                .testTag("language_picker"),
         ) {
             Column {
                 Surface(

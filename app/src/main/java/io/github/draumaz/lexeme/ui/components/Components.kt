@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toPath
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,18 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Matrix
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -49,16 +45,6 @@ import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
 import io.github.draumaz.lexeme.ui.theme.LexemeTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-/** Draws a [Morph] between two normalized polygons as a [Shape]. */
-class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val path = morph.toPath(progress)
-        path.transform(Matrix().apply { scale(size.width, size.height) })
-        return Outline.Generic(path)
-    }
-}
 
 /** The expressive shape set, cycled through for badges so neighbours never match. */
 val BadgeShapes: List<RoundedPolygon> = listOf(
@@ -94,7 +80,7 @@ fun Modifier.bouncyEnter(key: Any, seen: MutableSet<Any>, order: Int = 0): Modif
     val spatial = spring<Float>(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow)
     LaunchedEffect(key) {
         delay(order.coerceIn(0, 8) * 45L)
-        launch { progress.animateTo(1f, spatial) }
+        progress.animateTo(1f, spatial)
     }
     return graphicsLayer {
         val p = progress.value
@@ -263,7 +249,7 @@ fun ShapeBadge(
     rotation: () -> Float = { 0f },
     content: @Composable () -> Unit,
 ) {
-    val outline = remember(shape) { MorphShape(Morph(shape, shape), 0f) }
+    val outline = shape.toShape()
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
         Box(
             Modifier

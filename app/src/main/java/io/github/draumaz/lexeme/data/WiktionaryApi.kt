@@ -4,16 +4,22 @@ import io.github.draumaz.lexeme.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Wikimedia's User-Agent policy asks clients to name themselves and give contact info. Without
@@ -64,7 +70,7 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
     }
 
     /** Returns the resolved title, HTML and categories, or null if the page doesn't exist. */
-    private fun fetchParsed(title: String): Parsed? {
+    private suspend fun fetchParsed(title: String): Parsed? {
         val url = base.newBuilder()
             .addQueryParameter("action", "parse")
             .addQueryParameter("format", "json")
@@ -94,7 +100,9 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
      * alone), counts, and the first batch of subcategories and pages, fetched side by side.
      */
     suspend fun category(title: String): CategoryResult = coroutineScope {
-        val name = title.trim().substring(CategoryPrefix.length).trim().replace('_', ' ')
+        val trimmed = title.trim()
+        if (!isCategoryTitle(trimmed)) return@coroutineScope CategoryResult.Missing
+        val name = trimmed.substring(CategoryPrefix.length).trim().replace('_', ' ')
         if (name.isEmpty()) return@coroutineScope CategoryResult.Missing
         val requested = CategoryPrefix + name
         val parsed = async(Dispatchers.IO) { fetchParsed(requested) }
@@ -125,7 +133,7 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
     }
 
     /** The normalised title, (pages, subcategories) counts if known, and the first subcategories. */
-    private fun categoryInfo(title: String): Triple<String, Pair<Int, Int>?, CategoryMembers> {
+    private suspend fun categoryInfo(title: String): Triple<String, Pair<Int, Int>?, CategoryMembers> {
         val url = membersUrl(title, MemberKind.Subcategories, null).newBuilder()
             .addQueryParameter("prop", "categoryinfo")
             .addQueryParameter("titles", title)
@@ -141,7 +149,7 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
     suspend fun categoryMembers(title: String, kind: MemberKind, from: String?): CategoryMembers =
         withContext(Dispatchers.IO) { fetchMembers(title, kind, from) }
 
-    private fun fetchMembers(title: String, kind: MemberKind, from: String?): CategoryMembers =
+    private suspend fun fetchMembers(title: String, kind: MemberKind, from: String?): CategoryMembers =
         membersOf(getJson(membersUrl(title, kind, from)))
 
     private fun membersUrl(title: String, kind: MemberKind, from: String?): HttpUrl = base.newBuilder()
@@ -177,29 +185,38 @@ class WiktionaryApi(val client: OkHttpClient = defaultClient()) {
             .build()
         val body = get(url)
         val names = JSONArray(body).optJSONArray(1) ?: return@withContext emptyList()
-        List(names.length()) { names.getString(it) }
+        List(names.length()) { names.getString(it) }.distinct()
     }
 
-    /** A random main-namespace page, for the "surprise me" button. */
-    suspend fun randomTitle(): String = withContext(Dispatchers.IO) {
-        val url = base.newBuilder()
-            .addQueryParameter("action", "query")
-            .addQueryParameter("format", "json")
-            .addQueryParameter("formatversion", "2")
-            .addQueryParameter("list", "random")
-            .addQueryParameter("rnnamespace", "0")
-            .addQueryParameter("rnlimit", "1")
-            .build()
-        getJson(url).getJSONObject("query").getJSONArray("random").getJSONObject(0).getString("title")
-    }
+    private suspend fun getJson(url: HttpUrl) = JSONObject(get(url))
 
-    private fun getJson(url: HttpUrl) = JSONObject(get(url))
-
-    private fun get(url: HttpUrl): String {
+    private suspend fun get(url: HttpUrl): String {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-            return response.body.string()
+        val call = client.newCall(request)
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (cont.isActive) cont.resumeWithException(e)
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        response.use { res ->
+                            if (!res.isSuccessful) {
+                                if (cont.isActive) cont.resumeWithException(IOException("HTTP ${res.code}"))
+                                return
+                            }
+                            try {
+                                val body = res.body.string()
+                                if (cont.isActive) cont.resume(body)
+                            } catch (e: IOException) {
+                                if (cont.isActive) cont.resumeWithException(e)
+                            }
+                        }
+                    }
+                }
+            )
         }
     }
 

@@ -136,7 +136,6 @@ fun LexemeRoot(
     val recent by vm.recent.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
-    val randomBusy by vm.randomBusy.collectAsStateWithLifecycle()
 
     // The search field the scallop turns into, docked above the keyboard.
     var focused by remember { mutableStateOf(false) }
@@ -176,13 +175,16 @@ fun LexemeRoot(
     // Per-page scroll positions and "already bounced in" sets, so going back lands where you were.
     val listStates = remember { mutableMapOf<Long, LazyListState>() }
     val seenSets = remember { mutableMapOf<Long, MutableSet<Any>>() }
+    val imageViewer = remember { ImageViewerState() }
     // A new page (from a link, or from another app's "Look up") always drops the search
     // field's focus, so the keyboard never lingers over the entry.
     val topId = pages.lastOrNull()?.id
     LaunchedEffect(topId) {
         focusManager.clearFocus()
         keyboard?.hide()
+        dockedSearch = false
         find.reset()
+        imageViewer.close()
     }
     // Keyed on the stack itself, not page contents: a page finishing loading in the
     // background mustn't cut off a pronunciation that's playing.
@@ -193,7 +195,7 @@ fun LexemeRoot(
         audio.stop()
     }
 
-    // Opening a page (Surprise me beside settings, on two panes, or "Look up" from another
+    // Opening a page (a recent word beside settings, on two panes, or "Look up" from another
     // app) closes settings so the page isn't hidden behind them. Not on recreation, though.
     LaunchedEffect(Unit) {
         androidx.compose.runtime.snapshotFlow { pages.lastOrNull()?.id }
@@ -212,7 +214,7 @@ fun LexemeRoot(
         vm.open(text)
     }
 
-    val linkHandler: (Link) -> Unit = remember(vm) {
+    val linkHandler: (Link) -> Unit = remember(vm, haptics, openExternal) {
         { link ->
             haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
             when (link) {
@@ -255,6 +257,17 @@ fun LexemeRoot(
     var toolbarExpanded by remember { mutableStateOf(true) }
     // Every new (or returned-to) page starts with its toolbar out.
     LaunchedEffect(topId) { toolbarExpanded = true }
+    // The search scallop itself gets out of the way while reading down, and comes back on an
+    // upward scroll or once the page has been still for a second.
+    var scallopHidden by remember { mutableStateOf(false) }
+    LaunchedEffect(topId) { scallopHidden = false }
+    val pageMoves = remember { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+    LaunchedEffect(Unit) {
+        pageMoves.collectLatest {
+            kotlinx.coroutines.delay(1_000)
+            scallopHidden = false
+        }
+    }
     val scrollClaim = remember { ScrollClaim() }
     // Idle spins pause while anything scrolls (drags and flings alike pass through here),
     // and pick up again once it has been still for a moment.
@@ -283,8 +296,15 @@ fun LexemeRoot(
                 // counts as much as a flick; turning around starts the count again.
                 val dy = consumed.y + available.y
                 if (dy == 0f) return Offset.Zero
+                pageMoves.tryEmit(Unit)
                 run = if ((dy > 0f) == (run > 0f)) run + dy else dy
-                if (run < -toolbarTravel) toolbarExpanded = false else if (run > toolbarTravel) toolbarExpanded = true
+                if (run < -toolbarTravel) {
+                    toolbarExpanded = false
+                    scallopHidden = true
+                } else if (run > toolbarTravel) {
+                    toolbarExpanded = true
+                    scallopHidden = false
+                }
                 return Offset.Zero
             }
         }
@@ -294,11 +314,9 @@ fun LexemeRoot(
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentPadding = PaddingValues(top = top + 16.dp, bottom = bottom + 112.dp)
     val current = pages.lastOrNull()
-    val imageViewer = remember { ImageViewerState() }
     // Two panes on tablets and across a dual-screen hinge: the search bar heads the start pane,
     // and the reading, its toolbar, docked search and settings all live in the end pane.
     val split = rememberPaneSplit()
-    val sideBySide = split != null && !split.stacked
     val endPane = split?.endPane ?: Modifier
 
     CompositionLocalProvider(
@@ -362,9 +380,7 @@ fun LexemeRoot(
                     if (page == null) {
                         HomeScreen(
                             recent = recent,
-                            randomBusy = randomBusy,
                             onOpen = ::submit,
-                            onRandom = vm::random,
                             onClearHistory = vm::clearHistory,
                             onOpenSettings = { settingsOpen = true },
                         )
@@ -486,7 +502,7 @@ fun LexemeRoot(
             // One rotating search scallop, bottom centre on every screen. On entries the actions
             // (home and share) sit in see-through circles either side of it, and tuck into it while reading down.
             AnimatedVisibility(
-                visible = !focused && !dockedSearch && !find.open,
+                visible = !focused && !dockedSearch && !find.open && !scallopHidden,
                 enter = scaleIn(spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
                 exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
                 modifier = Modifier

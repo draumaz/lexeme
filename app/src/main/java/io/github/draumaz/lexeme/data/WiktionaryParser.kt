@@ -25,6 +25,10 @@ object WiktionaryParser {
     private val HeadingTag = Regex("h[1-6]")
     private val StrokeGif = Regex("-[a-z]?order\\.gif$")
 
+    private val EXTERNAL_NAMESPACES = setOf("File", "Special", "Help", "Talk", "User")
+    private val LAYOUT_TABLE_TAGS = setOf("ul", "ol", "dl", "table")
+    private val INFLECTION_KEYWORDS = listOf("declension", "conjugation", "inflection", "mutation")
+
     /** Block children that [Ctx.rich] flattens onto lines of their own. */
     private val LINE_TAGS = setOf("p", "div", "li", "dd", "tr")
 
@@ -236,19 +240,18 @@ object WiktionaryParser {
 
         private fun stylesOf(el: Element): List<SpanStyleKind> {
             val out = ArrayList<SpanStyleKind>(2)
-            val cls = el.classNames()
             when (el.normalName()) {
-                "b", "strong" -> out += if ("selflink" in cls || "headword" in cls) SpanStyleKind.Self else SpanStyleKind.Bold
+                "b", "strong" -> out += if (el.hasClass("selflink") || el.hasClass("headword")) SpanStyleKind.Self else SpanStyleKind.Bold
                 "i", "em", "cite", "var" -> out += SpanStyleKind.Italic
                 "sup" -> out += SpanStyleKind.Superscript
                 "sub" -> out += SpanStyleKind.Subscript
                 "small" -> out += SpanStyleKind.Small
                 "code", "kbd", "tt" -> out += SpanStyleKind.Ipa
             }
-            if ("IPA" in cls) out += SpanStyleKind.Ipa
-            if ("selflink" in cls || "mw-selflink" in cls) out += SpanStyleKind.Self
-            if ("ib-content" in cls || "ib-brac" in cls) out += SpanStyleKind.Label
-            if ("e-translation" in cls || "tr" in cls || "mention-tr" in cls || "e-transliteration" in cls) {
+            if (el.hasClass("IPA")) out += SpanStyleKind.Ipa
+            if (el.hasClass("selflink") || el.hasClass("mw-selflink")) out += SpanStyleKind.Self
+            if (el.hasClass("ib-content") || el.hasClass("ib-brac")) out += SpanStyleKind.Label
+            if (el.hasClass("e-translation") || el.hasClass("tr") || el.hasClass("mention-tr") || el.hasClass("e-transliteration")) {
                 out += SpanStyleKind.Muted
             }
             return out
@@ -274,7 +277,7 @@ object WiktionaryParser {
             val title = decode(path.substringBefore('#')).replace('_', ' ')
             val fragment = path.substringAfter('#', "").takeIf { it.isNotEmpty() }?.let(::decode)
             val namespace = title.substringBefore(':', "")
-            return if (namespace in setOf("File", "Special", "Help", "Talk", "User")) {
+            return if (namespace in EXTERNAL_NAMESPACES) {
                 Link.External(if (href.startsWith("http")) href else "https://en.wiktionary.org$href")
             } else {
                 Link.Wiki(title, fragment)
@@ -283,7 +286,6 @@ object WiktionaryParser {
 
         private fun blockOf(el: Element): List<Block> {
             val tag = el.normalName()
-            val cls = el.classNames()
             return when {
                 tag == "p" || tag == "pre" -> paragraph(el)
                 tag == "ul" || tag == "ol" -> listOfNotNull(list(el))
@@ -291,16 +293,16 @@ object WiktionaryParser {
                 tag == "table" -> table(el)
                 tag == "audio" -> listOfNotNull(audio(el, "Audio"))
                 tag == "figure" || tag == "img" || el.attr("typeof").startsWith("mw:File") ||
-                    "thumb" in cls -> media(el)
+                    el.hasClass("thumb") -> media(el)
                 tag == "blockquote" -> listOf(Block.Indented(IndentStyle.Quotation, blocksOf(el.childNodes())))
                 tag.matches(HeadingTag) -> listOfNotNull(rich(el)?.let {
                     Block.Paragraph(it.copy(spans = it.spans + Span(0, it.text.length, SpanStyleKind.Bold)))
                 })
                 tag == "hr" -> emptyList()
-                "etytree" in cls -> etymologyTree(el)
-                "picdic-box" in cls -> pictureDictionary(el)
-                "NavFrame" in cls -> navFrame(el)
-                "inflection-table-wrapper" in cls -> inflectionWrapper(el)
+                el.hasClass("etytree") -> etymologyTree(el)
+                el.hasClass("picdic-box") -> pictureDictionary(el)
+                el.hasClass("NavFrame") -> navFrame(el)
+                el.hasClass("inflection-table-wrapper") -> inflectionWrapper(el)
                 else -> blocksOf(el.childNodes())
             }
         }
@@ -369,8 +371,7 @@ object WiktionaryParser {
         }
 
         private fun table(el: Element): List<Block> {
-            val cls = el.classNames()
-            if ("audiotable" in cls) {
+            if (el.hasClass("audiotable")) {
                 val label = el.selectFirst("td")?.text()?.trim()?.trimEnd(':', ' ')?.ifBlank { null } ?: "Audio"
                 return listOfNotNull(el.selectFirst("audio")?.let { audio(it, label) })
             }
@@ -384,8 +385,8 @@ object WiktionaryParser {
                 return listOf(Block.StrokeOrder(imgs.mapNotNull { imageOf(it, null) }))
             }
             // Layout tables (translations, multi-column term lists) hold blocks, not data.
-            val layout = "translations" in cls || cells.any { c ->
-                c.children().any { it.normalName() in setOf("ul", "ol", "dl", "table") || it.hasClass("NavFrame") }
+            val layout = el.hasClass("translations") || cells.any { c ->
+                c.children().any { it.normalName() in LAYOUT_TABLE_TAGS || it.hasClass("NavFrame") }
             }
             if (layout) return cells.flatMap { blocksOf(it.childNodes()) }
 
@@ -397,7 +398,7 @@ object WiktionaryParser {
                         header = c.normalName() == "th",
                         colspan = c.attr("colspan").toIntOrNull()?.coerceIn(1, 40) ?: 1,
                         rowspan = c.attr("rowspan").toIntOrNull()?.coerceIn(1, 80) ?: 1,
-                        secondary = "secondary" in c.classNames(),
+                        secondary = c.hasClass("secondary"),
                     )
                 }
             }.filter { it.isNotEmpty() }
@@ -411,11 +412,11 @@ object WiktionaryParser {
             }
             if (grid.isEmpty()) return emptyList()
             val title = caption?.text.orEmpty().lowercase()
-            val inflection = cls.any { it.startsWith("inflection") || it.endsWith("-inflection-table") } ||
+            val inflection = el.classNames().any { it.startsWith("inflection") || it.endsWith("-inflection-table") } ||
                 el.closest(".inflection-table-wrapper") != null ||
-                listOf("declension", "conjugation", "inflection", "mutation").any { it in title }
+                INFLECTION_KEYWORDS.any { it in title }
             val table = Block.Table(caption, grid, emptyList(), inflection)
-            return if ("mw-collapsed" in cls && !inflection) {
+            return if (el.hasClass("mw-collapsed") && !inflection) {
                 listOf(Block.Collapsible(caption ?: RichText.plain("Table"), listOf(table.copy(caption = null)), false))
             } else {
                 listOf(table)
@@ -423,8 +424,9 @@ object WiktionaryParser {
         }
 
         private fun inflectionWrapper(el: Element): List<Block> {
-            val notes = el.selectFirst(".inflection-table-notes")?.let { blocksOf(it.childNodes()) }.orEmpty()
-            el.selectFirst(".inflection-table-notes")?.remove()
+            val notesEl = el.selectFirst(".inflection-table-notes")
+            val notes = notesEl?.let { blocksOf(it.childNodes()) }.orEmpty()
+            notesEl?.remove()
             val blocks = blocksOf(el.childNodes())
             var attached = false
             return blocks.map { b ->
@@ -446,7 +448,7 @@ object WiktionaryParser {
             if (blocks.isEmpty()) return emptyList()
             val title = rich(head) ?: RichText.plain("More")
             val t = title.text.lowercase()
-            val expand = listOf("conjugation", "declension", "inflection", "mutation").any { it in t } ||
+            val expand = INFLECTION_KEYWORDS.any { it in t } ||
                 blocks.any { it is Block.Table && it.inflection }
             return listOf(Block.Collapsible(title, blocks, expand))
         }

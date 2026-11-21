@@ -14,6 +14,7 @@ import io.github.draumaz.lexeme.data.LookupResult
 import io.github.draumaz.lexeme.data.WiktionaryApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +67,8 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     private val cache = LruCache<String, Entry>(16)
     /** Category pages as last seen, members loaded so far included. */
     private val categoryCache = LruCache<String, CategoryPage>(8)
+    private val loadJobs = HashMap<Long, Job>()
+    private val moreJobs = HashMap<Long, Job>()
     private var nextId = 1L
 
     private val _pages = MutableStateFlow<List<Page>>(emptyList())
@@ -79,9 +82,6 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     private val _messages = Channel<String>(Channel.BUFFERED)
     /** One-shot snackbar messages. */
     val messages = _messages.receiveAsFlow()
-
-    private val _randomBusy = MutableStateFlow(false)
-    val randomBusy: StateFlow<Boolean> = _randomBusy.asStateFlow()
 
     /**
      * Type-ahead titles, tagged with the query they answer: they arrive debounced, so the UI
@@ -123,51 +123,66 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun retry(page: Page) {
+        loadJobs.remove(page.id)?.cancel()
         replace(page.id) { it.copy(state = PageState.Loading) }
         load(page)
     }
 
     private fun load(page: Page) {
         if (isCategoryTitle(page.title)) return loadCategory(page)
-        viewModelScope.launch {
-            val state = try {
-                when (val result = api.lookup(page.title)) {
-                    is LookupResult.Found -> {
-                        cache.put(page.title, result.entry)
-                        cache.put(result.entry.title, result.entry)
-                        remember(result.entry.title)
-                        PageState.Loaded(result.entry)
+        loadJobs.remove(page.id)?.cancel()
+        lateinit var job: Job
+        job = viewModelScope.launch {
+            try {
+                val state = try {
+                    when (val result = api.lookup(page.title)) {
+                        is LookupResult.Found -> {
+                            cache.put(page.title, result.entry)
+                            cache.put(result.entry.title, result.entry)
+                            remember(result.entry.title)
+                            PageState.Loaded(result.entry)
+                        }
+                        is LookupResult.Missing -> PageState.Missing(result.suggestions)
                     }
-                    is LookupResult.Missing -> PageState.Missing(result.suggestions)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
+                replace(page.id) { it.copy(state = state) }
+            } finally {
+                if (loadJobs[page.id] === job) loadJobs.remove(page.id)
             }
-            replace(page.id) { it.copy(state = state) }
         }
+        loadJobs[page.id] = job
     }
 
     private fun loadCategory(page: Page) {
-        viewModelScope.launch {
-            val state = try {
-                when (val result = api.category(page.title)) {
-                    is CategoryResult.Found -> {
-                        categoryCache.put(page.title, result.category)
-                        categoryCache.put(result.category.title, result.category)
-                        remember(result.category.title)
-                        PageState.Category(result.category)
+        loadJobs.remove(page.id)?.cancel()
+        lateinit var job: Job
+        job = viewModelScope.launch {
+            try {
+                val state = try {
+                    when (val result = api.category(page.title)) {
+                        is CategoryResult.Found -> {
+                            categoryCache.put(page.title, result.category)
+                            categoryCache.put(result.category.title, result.category)
+                            remember(result.category.title)
+                            PageState.Category(result.category)
+                        }
+                        CategoryResult.Missing -> PageState.Missing(emptyList())
                     }
-                    CategoryResult.Missing -> PageState.Missing(emptyList())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                PageState.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't reach Wiktionary")
+                replace(page.id) { it.copy(state = state) }
+            } finally {
+                if (loadJobs[page.id] === job) loadJobs.remove(page.id)
             }
-            replace(page.id) { it.copy(state = state) }
         }
+        loadJobs[page.id] = job
     }
 
     /** Fetches the next batch of [kind] members for a category page; one batch at a time. */
@@ -177,27 +192,35 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
         val members = state.category.members(kind)
         val from = members.next ?: return
         replace(pageId) { it.copy(state = state.copy(loading = kind, failed = null)) }
-        viewModelScope.launch {
-            val more = try {
-                api.categoryMembers(state.category.title, kind, from)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null
-            }
-            replace(pageId) { page ->
-                val current = page.state as? PageState.Category ?: return@replace page
-                if (more == null) return@replace page.copy(state = current.copy(loading = null, failed = kind))
-                val category = current.category.let {
-                    when (kind) {
-                        MemberKind.Subcategories -> it.copy(subcategories = it.subcategories + more)
-                        MemberKind.Pages -> it.copy(pages = it.pages + more)
-                    }
+        moreJobs.remove(pageId)?.cancel()
+        lateinit var job: Job
+        job = viewModelScope.launch {
+            try {
+                val more = try {
+                    api.categoryMembers(state.category.title, kind, from)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
                 }
-                categoryCache.put(category.title, category)
-                page.copy(state = current.copy(category = category, loading = null, failed = null))
+                replace(pageId) { page ->
+                    val current = page.state as? PageState.Category ?: return@replace page
+                    if (more == null) return@replace page.copy(state = current.copy(loading = null, failed = kind))
+                    val category = current.category.let {
+                        when (kind) {
+                            MemberKind.Subcategories -> it.copy(subcategories = it.subcategories + more)
+                            MemberKind.Pages -> it.copy(pages = it.pages + more)
+                        }
+                    }
+                    categoryCache.put(page.title, category)
+                    categoryCache.put(category.title, category)
+                    page.copy(state = current.copy(category = category, loading = null, failed = null))
+                }
+            } finally {
+                if (moreJobs[pageId] === job) moreJobs.remove(pageId)
             }
         }
+        moreJobs[pageId] = job
     }
 
     private fun replace(id: Long, transform: (Page) -> Page) {
@@ -211,27 +234,18 @@ class LexemeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Pops one page; nothing when already home. */
     fun back() {
+        val popped = _pages.value.lastOrNull() ?: return
+        loadJobs.remove(popped.id)?.cancel()
+        moreJobs.remove(popped.id)?.cancel()
         _pages.update { it.dropLast(1) }
     }
 
     fun home() {
+        loadJobs.values.forEach { it.cancel() }
+        loadJobs.clear()
+        moreJobs.values.forEach { it.cancel() }
+        moreJobs.clear()
         _pages.value = emptyList()
-    }
-
-    fun random() {
-        if (_randomBusy.value) return
-        _randomBusy.value = true
-        viewModelScope.launch {
-            try {
-                open(api.randomTitle())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                _messages.send("Couldn't reach Wiktionary")
-            } finally {
-                _randomBusy.value = false
-            }
-        }
     }
 
     fun clearHistory() {

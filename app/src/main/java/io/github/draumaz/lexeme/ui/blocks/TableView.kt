@@ -178,10 +178,12 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
         grid.cells.forEachIndexed { i, c ->
             if (c.colspan > 1) {
                 val range = c.col until minOf(c.col + c.colspan, n)
-                val have = range.sumOf { cols[it] } + gap * (range.count() - 1)
+                val count = range.last - range.first + 1
+                if (count <= 0) return@forEachIndexed
+                val have = range.sumOf { cols[it] } + gap * (count - 1)
                 val need = if (minTotal >= target) narrowest[i] else minOf(preferred[i], maxOf(narrowest[i], have))
                 val extra = need - have
-                if (extra > 0) range.forEach { cols[it] += extra / range.count() + 1 }
+                if (extra > 0) range.forEach { cols[it] += extra / count + 1 }
             }
         }
         val x = IntArray(n + 1)
@@ -194,7 +196,9 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
         grid.cells.forEachIndexed { i, c ->
             if (c.rowspan > 1) {
                 val range = c.row until minOf(c.row + c.rowspan, grid.rows)
-                val have = range.sumOf { rows[it] } + gap * (range.count() - 1)
+                val count = range.last - range.first + 1
+                if (count <= 0) return@forEachIndexed
+                val have = range.sumOf { rows[it] } + gap * (count - 1)
                 if (heights[i] > have) rows[range.last] += heights[i] - have
             }
         }
@@ -284,9 +288,10 @@ private fun ScrollTrack(scroll: ScrollState, viewport: Int) {
                 .background(colors.surfaceContainerHighest)
                 .drawWithContent {
                     val content = viewport + scroll.maxValue
+                    if (content <= 0 || scroll.maxValue <= 0) return@drawWithContent
                     val thumb = (size.width * viewport / content).coerceAtLeast(12.dp.toPx())
                     val travel = size.width - thumb
-                    val fraction = if (scroll.maxValue == 0) 0f else scroll.value.toFloat() / scroll.maxValue
+                    val fraction = scroll.value.toFloat() / scroll.maxValue
                     val offset = if (layoutDirection == LayoutDirection.Rtl) travel * (1 - fraction) else travel * fraction
                     drawRoundRect(
                         colors.primary,

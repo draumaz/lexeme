@@ -1,5 +1,6 @@
 package io.github.draumaz.lexeme.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -66,6 +67,7 @@ import io.github.draumaz.lexeme.ui.components.PoppingTitle
 import io.github.draumaz.lexeme.ui.components.ShapeBadge
 import io.github.draumaz.lexeme.ui.components.bouncyEnter
 import io.github.draumaz.lexeme.ui.components.pressScale
+import io.github.draumaz.lexeme.ui.components.rememberStagger
 import io.github.draumaz.lexeme.ui.components.segmentShape
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -88,15 +90,16 @@ internal data class CategoryGroup(val label: String?, val categories: List<Strin
  */
 internal fun groupCategories(categories: List<String>, languages: List<String>): List<CategoryGroup> {
     if (categories.isEmpty()) return emptyList()
-    val byLength = languages.distinct().sortedByDescending { it.length }
+    val distinctLanguages = languages.distinct()
+    val byLength = distinctLanguages.sortedByDescending { it.length }
+    fun matches(s: String, lang: String): Boolean =
+        s.startsWith(lang) && (s.length == lang.length || s[lang.length] == ' ' || s[lang.length] == '/')
     fun languageOf(category: String): String? {
         val bare = category.substringAfter(':')
-        return byLength.firstOrNull { lang ->
-            listOf(category, bare).any { it.startsWith("$lang ") || it.startsWith("$lang/") || it == lang }
-        }
+        return byLength.firstOrNull { lang -> matches(category, lang) || (bare !== category && matches(bare, lang)) }
     }
     val grouped = categories.groupBy(::languageOf)
-    val groups = languages.distinct().mapNotNull { lang -> grouped[lang]?.let { CategoryGroup(lang, it) } } +
+    val groups = distinctLanguages.mapNotNull { lang -> grouped[lang]?.let { CategoryGroup(lang, it) } } +
         listOfNotNull(grouped[null]?.let { CategoryGroup("Other", it) })
     return if (groups.size == 1) listOf(groups[0].copy(label = null)) else groups
 }
@@ -289,6 +292,7 @@ internal fun CategoryView(
         category.subcategories.titles.map { it.removePrefix(CategoryPrefix) }
     }
     val parents = remember(category.parents) { groupCategories(category.parents, emptyList()) }
+    val shownAt = remember(category.title) { SystemClock.uptimeMillis() }
     val onLink = LocalLinkHandler.current
     val haptics = LocalHapticFeedback.current
 
@@ -361,6 +365,7 @@ internal fun CategoryView(
                 // Keyed by position: a category can list the same title under two sort keys.
                 itemsIndexed(pages.titles, key = { i, _ -> "page-$i" }) { i, title ->
                     val source = remember { MutableInteractionSource() }
+                    val order = rememberStagger(i.coerceAtMost(8), shownAt)
                     Surface(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -374,7 +379,7 @@ internal fun CategoryView(
                             .padding(horizontal = 16.dp)
                             .padding(bottom = 3.dp)
                             .pressScale(source, 0.97f)
-                            .bouncyEnter("page-$i", seen, i.coerceAtMost(8)),
+                            .bouncyEnter("page-$i", seen, order),
                     ) {
                         Text(
                             title,

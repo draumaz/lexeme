@@ -50,6 +50,13 @@ enum class SectionKind {
             "definitions", "kanji", "hanja", "han character", "logogram", "combining form",
         )
 
+        private val relations = setOf(
+            "synonyms", "antonyms", "hypernyms", "hyponyms", "meronyms", "holonyms", "troponyms",
+            "derived terms", "related terms", "coordinate terms", "descendants", "compounds",
+            "see also", "alternative forms", "derived characters", "collocations", "anagrams",
+            "idioms", "proverbs", "paronyms", "abbreviations", "related characters", "phrasal verbs",
+        )
+
         private val trailingNumber = Regex("\\s+\\d+$")
 
         fun of(title: String): SectionKind {
@@ -61,12 +68,7 @@ enum class SectionKind {
                 t.startsWith("declension") || t.startsWith("conjugation") || t.startsWith("inflection") ||
                     t.startsWith("mutation") || t == "forms" || t.startsWith("conjugated forms") -> INFLECTION
                 t.startsWith("translation") -> TRANSLATIONS
-                t in setOf(
-                    "synonyms", "antonyms", "hypernyms", "hyponyms", "meronyms", "holonyms", "troponyms",
-                    "derived terms", "related terms", "coordinate terms", "descendants", "compounds",
-                    "see also", "alternative forms", "derived characters", "collocations", "anagrams",
-                    "idioms", "proverbs", "paronyms", "abbreviations", "related characters", "phrasal verbs",
-                ) -> RELATIONS
+                t in relations -> RELATIONS
                 t.startsWith("usage notes") || t == "trivia" || t == "notes" -> USAGE
                 t == "references" || t == "further reading" || t == "sources" || t == "external links" -> REFERENCES
                 else -> OTHER

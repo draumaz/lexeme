@@ -92,8 +92,11 @@ private class GlassNode(
 ) : Modifier.Node(), DrawModifierNode {
     private var renderNode: RenderNode? = null
     private var lastBlurPx = -1f
-    /** The last outline built, with what it was built for. */
-    private var cachedOutline: Pair<Triple<Size, LayoutDirection, Shape>, Outline>? = null
+    /** The last outline built, with what it was built for (plain fields avoid per-frame allocations). */
+    private var cachedSize = Size.Unspecified
+    private var cachedDirection: LayoutDirection? = null
+    private var cachedShape: Shape? = null
+    private var cachedOutline: Outline? = null
     /** The outline the render node already clips to, so it isn't rebuilt every frame. */
     private var appliedOutline: Outline? = null
 
@@ -101,6 +104,9 @@ private class GlassNode(
         renderNode?.discardDisplayList()
         renderNode = null
         lastBlurPx = -1f
+        cachedSize = Size.Unspecified
+        cachedDirection = null
+        cachedShape = null
         cachedOutline = null
         appliedOutline = null
     }
@@ -108,9 +114,16 @@ private class GlassNode(
     // setBackdropRenderEffect is 37.2; every path to it is behind GlassSupported.
     @SuppressLint("NewApi")
     override fun ContentDrawScope.draw() {
-        val key = Triple(size, layoutDirection, shape)
-        val shapeOutline = cachedOutline?.takeIf { it.first == key }?.second
-            ?: shape.createOutline(size, layoutDirection, this).also { cachedOutline = key to it }
+        val shapeOutline = if (cachedOutline != null && cachedSize == size && cachedDirection == layoutDirection && cachedShape == shape) {
+            cachedOutline!!
+        } else {
+            shape.createOutline(size, layoutDirection, this).also {
+                cachedSize = size
+                cachedDirection = layoutDirection
+                cachedShape = shape
+                cachedOutline = it
+            }
+        }
 
         val target = drawContext.canvas.nativeCanvas
         if (!GlassSupported || target !is RecordingCanvas || size.isEmpty()) {
