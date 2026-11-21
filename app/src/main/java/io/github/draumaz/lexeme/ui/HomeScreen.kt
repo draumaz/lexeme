@@ -188,18 +188,10 @@ fun HomeScreen(
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .height(bottomPad)
-                        .progressiveBlur { 12.dp * blurFraction }
-                        .drawBehind {
-                            if (blurFraction > 0f) {
-                                drawRect(
-                                    Brush.verticalGradient(
-                                        0f to surface.copy(alpha = 0f),
-                                        0.45f to surface.copy(alpha = 0.5f * blurFraction),
-                                        1f to surface.copy(alpha = 0.9f * blurFraction),
-                                    )
-                                )
-                            }
-                        }
+                        .progressiveBlur(
+                            blur = { 12.dp * blurFraction },
+                            scrim = { surface.copy(alpha = 0.9f * blurFraction) },
+                        )
                 )
             }
         }

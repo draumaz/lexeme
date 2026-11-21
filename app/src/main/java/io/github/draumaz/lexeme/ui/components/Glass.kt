@@ -4,10 +4,12 @@ import android.annotation.SuppressLint
 import android.graphics.RecordingCanvas
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
+import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
@@ -199,19 +201,82 @@ private class GlassNode(
 }
 
 /**
- * Progressive vertical backdrop blur that ramps from zero at the top edge to [blur] at the
- * bottom, so scrolling content softens gradually without a hard horizontal seam.
+ * Progressive vertical backdrop blur: sharp at the top edge, easing smoothly up to [blur] at the
+ * bottom, with a [scrim] of colour fading in alongside it (its alpha is the strength at the
+ * bottom). Both are read at draw time, so animating them never recomposes.
+ *
+ * It's one backdrop pass through a variable-radius Gaussian (a horizontal then a vertical
+ * AGSL pass, the radius following the row), rather than stacked blur layers, so there are no
+ * seams between steps and no ghosted double image where a sharp layer shows through a soft
+ * one. The scrim is mixed in the same shader and dithered, so the long, shallow fade over the
+ * surface colour can't band. Before Android 17 QPR2 it's just the scrim, drawn as a gradient
+ * along the same curve.
  */
-fun Modifier.progressiveBlur(blur: () -> Dp): Modifier = this then ProgressiveBlurElement(blur)
+fun Modifier.progressiveBlur(blur: () -> Dp, scrim: () -> Color = { Color.Transparent }): Modifier =
+    this then ProgressiveBlurElement(blur, scrim)
 
-private const val ProgressiveBlurSteps = 8
+/** How far down the band (0 to 1) the blur reaches full strength. */
+private const val ProgressiveBlurFullAt = 0.85f
+
+/**
+ * One direction of the variable blur. The radius at a pixel is [maxSigma] times a smoothstep
+ * down the band; taps sit a quarter sigma apart out to three sigma, so the weights are constant
+ * and the spacing never gets coarse enough to ghost. The vertical pass also lays in the scrim.
+ */
+private const val ProgressiveBlurShader = """
+uniform shader content;
+uniform float2 size;
+uniform float maxSigma;
+uniform float2 dir;
+uniform float fullAt;
+uniform half4 scrim; // premultiplied; alpha is the strength at the bottom
+uniform float applyScrim;
+
+float ease(float y) {
+    float t = clamp(y / (size.y * fullAt), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+half4 main(float2 p) {
+    float sigma = maxSigma * ease(p.y);
+    half4 color;
+    if (sigma < 0.35) {
+        color = content.eval(p);
+    } else {
+        float2 stepV = dir * (sigma * 0.25);
+        float2 lo = float2(0.5);
+        float2 hi = size - 0.5;
+        half4 acc = half4(0.0);
+        float total = 0.0;
+        for (int i = -12; i <= 12; i++) {
+            float x = float(i) * 0.25;
+            float w = exp(-0.5 * x * x);
+            acc += content.eval(clamp(p + stepV * float(i), lo, hi)) * half(w);
+            total += w;
+        }
+        color = acc / half(total);
+    }
+    if (applyScrim > 0.5) {
+        float t = clamp(p.y / size.y, 0.0, 1.0);
+        half a = half(t * t * (3.0 - 2.0 * t));
+        color = color * (1.0 - scrim.a * a) + scrim * a;
+        // A whisper of noise, under one 8-bit step, so the fade has no bands.
+        float n = fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453)
+            + fract(sin(dot(p, float2(39.3467, 11.1351))) * 24634.6345) - 1.0;
+        color.rgb += half3(n / 255.0) * color.a;
+    }
+    return color;
+}
+"""
 
 private data class ProgressiveBlurElement(
     val blur: () -> Dp,
+    val scrim: () -> Color,
 ) : ModifierNodeElement<ProgressiveBlurNode>() {
-    override fun create() = ProgressiveBlurNode(blur)
+    override fun create() = ProgressiveBlurNode(blur, scrim)
     override fun update(node: ProgressiveBlurNode) {
         node.blur = blur
+        node.scrim = scrim
         node.invalidateDraw()
     }
     override fun InspectorInfo.inspectableProperties() {
@@ -221,53 +286,84 @@ private data class ProgressiveBlurElement(
 
 private class ProgressiveBlurNode(
     var blur: () -> Dp,
+    var scrim: () -> Color,
 ) : Modifier.Node(), DrawModifierNode {
-    private val nodes = arrayOfNulls<RenderNode>(ProgressiveBlurSteps)
-    private var lastBlurPx = -1f
+    private var renderNode: RenderNode? = null
+    private var horizontal: RuntimeShader? = null
+    private var vertical: RuntimeShader? = null
+    private var lastSigma = -1f
+    private var lastScrim = Color.Unspecified
+    private var lastW = -1
+    private var lastH = -1
 
     override fun onDetach() {
-        for (i in nodes.indices) {
-            nodes[i]?.discardDisplayList()
-            nodes[i] = null
-        }
-        lastBlurPx = -1f
+        renderNode?.discardDisplayList()
+        renderNode = null
+        horizontal = null
+        vertical = null
+        lastSigma = -1f
+        lastScrim = Color.Unspecified
+        lastW = -1
+        lastH = -1
     }
 
+    // RuntimeShader is 33 and setBackdropRenderEffect 37.2; both are behind GlassSupported.
     @SuppressLint("NewApi")
     override fun ContentDrawScope.draw() {
         val target = drawContext.canvas.nativeCanvas
-        val maxBlurPx = blur().toPx().coerceAtLeast(0f)
-        if (!GlassSupported || target !is RecordingCanvas || size.isEmpty() || maxBlurPx < 0.5f) {
+        val scrimColor = scrim()
+        // Skia's blur radius to sigma, so the dp reads as it does for createBlurEffect.
+        val radiusPx = blur().toPx().coerceAtLeast(0f)
+        val sigma = if (radiusPx < 0.5f) 0f else radiusPx * 0.57735f + 0.5f
+        if (!GlassSupported || target !is RecordingCanvas || size.isEmpty()) {
+            if (scrimColor.alpha > 0f) drawRect(scrimGradient(scrimColor))
+            drawContent()
+            return
+        }
+        if (sigma == 0f && scrimColor.alpha == 0f) {
             drawContent()
             return
         }
 
         val w = size.width.roundToInt()
         val h = size.height.roundToInt()
-        val blurChanged = maxBlurPx != lastBlurPx
-        if (blurChanged) lastBlurPx = maxBlurPx
-
-        for (i in 0 until ProgressiveBlurSteps) {
-            val frac = (i + 1).toFloat() / ProgressiveBlurSteps
-            val top = ((i.toFloat() / ProgressiveBlurSteps) * 0.72f * h).roundToInt()
-            val bandH = (h - top).coerceAtLeast(1)
-            val rn = nodes[i] ?: RenderNode("progressiveBlur_$i").also { nodes[i] = it }
-            rn.setPosition(0, top, w, h)
-            rn.clipToBounds = true
-            rn.alpha = frac
-            if (blurChanged) {
-                val stepBlur = maxBlurPx * frac
-                rn.setBackdropRenderEffect(
-                    if (stepBlur < 0.5f) null
-                    else RenderEffect.createBlurEffect(stepBlur, stepBlur, Shader.TileMode.CLAMP)
-                )
+        val rn = renderNode ?: RenderNode("progressiveBlur").also { renderNode = it }
+        if (w != lastW || h != lastH || sigma != lastSigma || scrimColor != lastScrim) {
+            val hs = horizontal ?: RuntimeShader(ProgressiveBlurShader).also { horizontal = it }
+            val vs = vertical ?: RuntimeShader(ProgressiveBlurShader).also { vertical = it }
+            for ((shader, dx, dy) in listOf(Triple(hs, 1f, 0f), Triple(vs, 0f, 1f))) {
+                shader.setFloatUniform("size", w.toFloat(), h.toFloat())
+                shader.setFloatUniform("maxSigma", sigma)
+                shader.setFloatUniform("dir", dx, dy)
+                shader.setFloatUniform("fullAt", ProgressiveBlurFullAt)
             }
-            // Record an empty display list so the node participates in the backdrop pass.
-            rn.beginRecording(w, bandH)
-            rn.endRecording()
-            target.drawRenderNode(rn)
+            val a = scrimColor.alpha
+            hs.setFloatUniform("scrim", 0f, 0f, 0f, 0f)
+            hs.setFloatUniform("applyScrim", 0f)
+            vs.setFloatUniform("scrim", scrimColor.red * a, scrimColor.green * a, scrimColor.blue * a, a)
+            vs.setFloatUniform("applyScrim", 1f)
+            rn.setPosition(0, 0, w, h)
+            rn.setBackdropRenderEffect(
+                RenderEffect.createChainEffect(
+                    RenderEffect.createRuntimeShaderEffect(vs, "content"),
+                    RenderEffect.createRuntimeShaderEffect(hs, "content"),
+                )
+            )
+            lastW = w; lastH = h; lastSigma = sigma; lastScrim = scrimColor
         }
+        // Record an empty display list so the node takes part in the backdrop pass.
+        rn.beginRecording(w, h)
+        rn.endRecording()
+        target.drawRenderNode(rn)
         drawContent()
     }
-}
 
+    /** The fallback scrim: the shader's smoothstep, laid out in enough stops to follow the curve. */
+    private fun scrimGradient(color: Color): Brush {
+        val stops = Array(17) { i ->
+            val t = i / 16f
+            t to color.copy(alpha = color.alpha * t * t * (3f - 2f * t))
+        }
+        return Brush.verticalGradient(*stops)
+    }
+}
