@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -79,6 +80,14 @@ import io.github.draumaz.lexeme.ui.components.pressScale
 import io.github.draumaz.lexeme.ui.components.rememberSpin
 import io.github.draumaz.lexeme.ui.theme.Wordmark
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.PI
+import kotlin.math.pow
+import kotlin.math.sin
 
 private val Samples = listOf("serendipity", "water", "Hund", "水", "книга", "amour", "saudade", "猫")
 
@@ -315,7 +324,9 @@ private fun WordChips(words: List<String>, seen: MutableSet<Any>, prefix: String
 
 /**
  * The app's mark: an expressive shape that keeps morphing through the shape set and slowly
- * turning, with the book icon riding on top. Tapping it gives a bouncy squish.
+ * turning, with the book icon riding on top. Tapping it gives a bouncy squish. Holding it down
+ * charges it up: it swells, jiggles faster and faster and spins up, ticking as it goes, until it
+ * pops with a ripple and springs back. It pops once per hold; lift and press again for another.
  */
 @Composable
 private fun HeroMark(modifier: Modifier = Modifier) {
@@ -334,21 +345,80 @@ private fun HeroMark(modifier: Modifier = Modifier) {
     )
     val spin by loop.animateFloat(0f, 360f, infiniteRepeatable(tween(24000, easing = LinearEasing)), label = "spin")
     val squish = remember { Animatable(1f) }
+    // The hold: how charged the mark is (0 to 1), the jiggle's clock, and the extra turn it winds up.
+    val charge = remember { Animatable(0f) }
+    val jiggle = remember { mutableFloatStateOf(0f) }
+    val boost = remember { mutableFloatStateOf(0f) }
+    val bursts = remember { mutableStateListOf<PopBurst>() }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val colors = MaterialTheme.colorScheme
+
+    fun pop() {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        scope.launch {
+            squish.snapTo(0.62f)
+            squish.animateTo(1f, spring(dampingRatio = 0.32f, stiffness = 420f))
+        }
+        val burst = PopBurst()
+        bursts += burst
+        scope.launch {
+            burst.progress.animateTo(1f, tween(380, easing = LinearEasing))
+            bursts -= burst
+        }
+    }
 
     // Phase and spin are read only while drawing, so the endless morph never recomposes.
     Box(
         modifier
             .size(140.dp)
-            .graphicsLayer { scaleX = squish.value; scaleY = squish.value }
-            .clickable(interactionSource = null, indication = null) {
-                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                scope.launch {
-                    squish.snapTo(0.78f)
-                    squish.animateTo(1f, spring(dampingRatio = 0.3f, stiffness = 500f))
-                }
+            .drawWithContent {
+                // The pop's ripple goes under the mark, so the mark springs back over it.
+                bursts.forEach { drawBurst(it, colors.primary) }
+                drawContent()
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        var popped = false
+                        val charging = scope.launch {
+                            var last = withFrameNanos { it }
+                            var held = 0f
+                            var tick = 0f
+                            while (!popped) {
+                                val now = withFrameNanos { it }
+                                val dt = (now - last) / 1_000_000f
+                                last = now
+                                held += dt
+                                val c = (held / PopChargeMs).coerceIn(0f, 1f)
+                                charge.snapTo(c)
+                                jiggle.floatValue += dt * (0.012f + 0.05f * c * c)
+                                boost.floatValue += dt * 0.9f * c * c
+                                // Ticks that come quicker as it fills.
+                                tick += dt
+                                if (tick > 150f - 100f * c) {
+                                    tick = 0f
+                                    haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                }
+                                if (c >= 1f) {
+                                    pop()
+                                    popped = true
+                                    charge.snapTo(0f)
+                                }
+                            }
+                        }
+                        val released = tryAwaitRelease()
+                        charging.cancel()
+                        scope.launch { charge.animateTo(0f, spring(dampingRatio = 0.4f, stiffness = 600f)) }
+                        if (released && !popped) {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            scope.launch {
+                                squish.snapTo(0.78f)
+                                squish.animateTo(1f, spring(dampingRatio = 0.3f, stiffness = 500f))
+                            }
+                        }
+                    },
+                )
             }
             .testTag("hero"),
         contentAlignment = Alignment.Center,
@@ -356,6 +426,14 @@ private fun HeroMark(modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    // Swell with the charge, and jiggle (squash one way, stretch the other) harder as it fills.
+                    val c = charge.value
+                    val swell = squish.value * (1f + 0.16f * c)
+                    val wobble = sin(jiggle.floatValue * 2f * PI.toFloat()) * 0.07f * c
+                    scaleX = swell * (1f + wobble)
+                    scaleY = swell * (1f - wobble)
+                }
                 .morphBackground(
                     colors.primaryContainer,
                     morph = { morphs[phase.toInt().coerceIn(0, shapes.lastIndex)] },
@@ -364,11 +442,43 @@ private fun HeroMark(modifier: Modifier = Modifier) {
                         val index = phase.toInt().coerceIn(0, shapes.lastIndex)
                         FastOutSlowInEasing.transform(((phase - index - 0.6f) / 0.4f).coerceIn(0f, 1f))
                     },
-                    rotation = { spin },
+                    rotation = { spin + boost.floatValue },
                 )
         )
-        Icon(Icons.Rounded.AutoStories, null, Modifier.size(68.dp), tint = colors.onPrimaryContainer)
+        Icon(
+            Icons.Rounded.AutoStories, null,
+            Modifier
+                .size(68.dp)
+                .graphicsLayer {
+                    val c = charge.value
+                    val s = squish.value * (1f + 0.1f * c)
+                    scaleX = s; scaleY = s
+                    rotationZ = sin(jiggle.floatValue * 2f * PI.toFloat() + 1f) * 6f * c
+                },
+            tint = colors.onPrimaryContainer,
+        )
     }
+}
+
+/** How long a hold takes to charge the mark up to its pop. */
+private const val PopChargeMs = 720f
+
+/** One pop of the mark: its ripple runs out as [progress] goes 0 to 1. */
+private class PopBurst {
+    val progress = Animatable(0f)
+}
+
+/** Draws [burst]'s ripple: a ring out from the mark's edge, thinning and fading as it goes. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBurst(burst: PopBurst, color: androidx.compose.ui.graphics.Color) {
+    val p = burst.progress.value
+    if (p >= 1f) return
+    val r = size.minDimension / 2f
+    val eased = 1f - (1f - p).pow(3)
+    drawCircle(
+        color.copy(alpha = 0.55f * (1f - p)),
+        radius = r * (0.85f + 0.55f * eased),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.12f * (1f - p)),
+    )
 }
 
 /**
