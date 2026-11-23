@@ -512,9 +512,11 @@ private fun EntryView(
             findToken++
         }
     }
-    val activeHit = if (find != null && findIndex.total > 0) findIndex.rowOf(find.current.coerceIn(0, findIndex.total - 1)) else -1
+    // Clamped: for a frame after the query narrows, current can still point past the new total.
+    val activeMatch = if (find != null && findIndex.total > 0) find.current.coerceIn(0, findIndex.total - 1) else -1
+    val activeHit = if (activeMatch >= 0) findIndex.rowOf(activeMatch) else -1
     val activeRow = if (activeHit >= 0) findIndex.rows[activeHit] else -1
-    val activeOrdinal = if (activeHit >= 0) find!!.current - findIndex.firsts[activeHit] else -1
+    val activeOrdinal = if (activeHit >= 0) activeMatch - findIndex.firsts[activeHit] else -1
 
     /**
      * A row of reading text: selectable for copying (a section at a time; selections can't

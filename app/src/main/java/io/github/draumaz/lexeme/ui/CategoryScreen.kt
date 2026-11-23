@@ -384,9 +384,10 @@ internal fun CategoryView(
             ?: pages.titles.lastIndex.takeIf { it >= 0 }
     }
 
-    // A finished jump brings the freshly loaded pages to the top.
+    // A finished jump brings the freshly loaded pages to the top, once: coming back to this page
+    // from an entry recomposes it, and must keep the scroll position the reader left.
     LaunchedEffect(state.jumps) {
-        if (state.jumps > 0) listState.scrollToItem(latestLabel)
+        if (state.jumps > 0 && seen.add("jump-${state.jumps}")) listState.scrollToItem(latestLabel)
     }
 
     @Composable
@@ -509,7 +510,7 @@ internal fun CategoryView(
                 )
             }
         }
-        if (quickScroll && alphabet != null) {
+        if (quickScroll) {
             AnimatedVisibility(
                 visible = atPages,
                 enter = slideInHorizontally(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),

@@ -580,13 +580,27 @@ object WiktionaryParser {
 
     private val ThumbWidth = Regex("/(\\d+)px-")
 
-    /** A thumbnail refetched [SharpWidth] wide, or the original file if that's smaller, keeping its shape. */
+    /** Originals the image loader can draw as they are; anything else (SVG, TIFF, PDF) needs a thumbnail. */
+    private val RasterExtensions = setOf("png", "jpg", "jpeg", "gif", "webp")
+
+    /**
+     * A thumbnail refetched [SharpWidth] wide, or the original file if that's smaller, keeping its
+     * shape. An SVG always gets the thumbnail, since it scales up cleanly and can't be drawn raw.
+     */
     internal fun sharper(image: Image, img: Element): Image {
         val fileWidth = img.attr("data-file-width").toIntOrNull() ?: return image
         if (image.width <= 0 || image.height <= 0 || "/thumb/" !in image.url) return image
-        if (fileWidth <= image.width) return image
-        val width = minOf(SharpWidth, fileWidth)
-        val url = if (fileWidth <= SharpWidth) originalOf(image.url) else ThumbWidth.replace(image.url) { "/${width}px-" }
+        val extension = originalOf(image.url).substringAfterLast('.').lowercase()
+        val vector = extension == "svg"
+        if (!vector && fileWidth <= image.width) return image
+        val width = if (vector) SharpWidth else minOf(SharpWidth, fileWidth)
+        val url = when {
+            vector || fileWidth > SharpWidth -> ThumbWidth.replace(image.url) { "/${width}px-" }
+            extension in RasterExtensions -> originalOf(image.url)
+            else -> return image
+        }
+        // Paged thumbnails (`lossy-page1-220px-…`) don't take a plain width; leave those be.
+        if (width <= image.width || url == image.url) return image
         return image.copy(url = url, width = width, height = image.height * width / image.width)
     }
 

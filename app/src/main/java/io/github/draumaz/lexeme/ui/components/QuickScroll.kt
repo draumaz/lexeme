@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -118,7 +119,7 @@ fun AlphabetScrollbar(
     val density = LocalDensity.current
     var active by remember { mutableStateOf(false) }
     var picked by remember { mutableIntStateOf(-1) }
-    var fingerY by remember { mutableStateOf(0f) }
+    var fingerY by remember { mutableFloatStateOf(0f) }
     val latestScrub by rememberUpdatedState(onScrub)
     val latestRelease by rememberUpdatedState(onRelease)
 

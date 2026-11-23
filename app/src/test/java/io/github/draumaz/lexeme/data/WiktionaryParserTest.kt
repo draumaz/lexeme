@@ -217,6 +217,25 @@ class WiktionaryParserTest {
     }
 
     @Test
+    fun picturesSharpenWithoutLeavingDrawableFormats() {
+        fun sharpen(file: String, fileWidth: Int): Image {
+            val thumb = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/$file/120px-$file" +
+                (if (file.endsWith(".svg")) ".png" else "")
+            val img = org.jsoup.Jsoup.parseBodyFragment("""<img data-file-width="$fileWidth">""").selectFirst("img")!!
+            return WiktionaryParser.sharper(Image(thumb, 120, 90, null, false), img)
+        }
+        // A small raster: its original.
+        assertEquals("https://upload.wikimedia.org/wikipedia/commons/a/ab/Cat.jpg", sharpen("Cat.jpg", 300).url)
+        assertEquals(300, sharpen("Cat.jpg", 300).width)
+        // A large one: the standard 500px thumbnail.
+        assertTrue(sharpen("Cat.jpg", 2000).url.endsWith("/500px-Cat.jpg"))
+        // An SVG never goes raw, however small: it scales up as a PNG thumbnail.
+        val svg = sharpen("Cat.svg", 200)
+        assertTrue(svg.url, svg.url.endsWith("/500px-Cat.svg.png"))
+        assertEquals(375, svg.height)
+    }
+
+    @Test
     fun etymologyTreeKeepsMergingBranches() {
         fun block(lang: String, term: String, label: String? = null) =
             """<div class="etytree-block"><span class="etyl">$lang</span> <span class="etytree-term"><i>$term</i></span>""" +
