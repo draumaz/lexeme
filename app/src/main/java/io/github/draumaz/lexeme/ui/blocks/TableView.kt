@@ -53,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,13 @@ import io.github.draumaz.lexeme.ui.components.ShapeBadge
 /** Tables beyond this many rows render a prefix first; dialect tables run to 500 rows. */
 private const val ROW_PREVIEW = 40
 
+/**
+ * True inside a table cell. Cells are measured intrinsically and SubcomposeLayout (so
+ * BoxWithConstraints) can't answer that, so a table nested in a cell (Finnish possessive
+ * forms, for one) lays out as a bare grid and leaves fitting and scrolling to the outer table.
+ */
+private val LocalInTableCell = staticCompositionLocalOf { false }
+
 @Composable
 fun TableView(table: Block.Table) {
     var showAll by remember(table) { mutableStateOf(false) }
@@ -94,7 +102,9 @@ fun TableView(table: Block.Table) {
         }
         // Tables shrink to fit the screen: columns first, then the whole grid down to MIN_SCALE.
         // Past that they scroll sideways, with faded edges and a track that show there's more.
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (LocalInTableCell.current) {
+            GridLayout(grid, table.inflection, Constraints.Infinity)
+        } else BoxWithConstraints(Modifier.fillMaxWidth()) {
             val available = constraints.maxWidth
             val scroll = rememberScrollState()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -132,14 +142,20 @@ private const val MIN_SCALE = 0.72f
 private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
     Layout(content = {
         grid.cells.forEach { CellBox(it, grid, inflection) }
-    }) { measurables, _ ->
+    }) { measurables, constraints ->
         val gap = 3.dp.roundToPx()
         val maxCell = 260.dp.roundToPx()
+        // A nested table gets no width from outside, so it fits whatever its cell is given.
+        val room = if (constraints.hasBoundedWidth) minOf(available, constraints.maxWidth) else available
+        // A cell holding a whole table isn't held to one column's width.
+        val cap = IntArray(measurables.size) {
+            if (grid.cells[it].cell.blocks.any { b -> b is Block.Table }) Int.MAX_VALUE else maxCell
+        }
         val minCell = 36.dp.roundToPx()
         val n = grid.columns
         val gaps = gap * (n - 1).coerceAtLeast(0)
         val preferred = IntArray(measurables.size) {
-            measurables[it].maxIntrinsicWidth(Constraints.Infinity).coerceAtMost(maxCell * grid.cells[it].colspan)
+            measurables[it].maxIntrinsicWidth(Constraints.Infinity).coerceAtMost(if (cap[it] == Int.MAX_VALUE) cap[it] else cap[it] * grid.cells[it].colspan)
         }
         // A column can't go narrower than its longest unbreakable word.
         val narrowest = IntArray(measurables.size) {
@@ -149,8 +165,8 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
         val min = IntArray(n)
         grid.cells.forEachIndexed { i, c ->
             if (c.colspan == 1) {
-                pref[c.col] = maxOf(pref[c.col], preferred[i].coerceIn(minCell, maxCell))
-                min[c.col] = maxOf(min[c.col], narrowest[i].coerceIn(minCell, maxCell))
+                pref[c.col] = maxOf(pref[c.col], preferred[i].coerceIn(minCell, cap[i]))
+                min[c.col] = maxOf(min[c.col], narrowest[i].coerceIn(minCell, cap[i]))
             }
         }
         for (k in 0 until n) {
@@ -160,7 +176,7 @@ private fun GridLayout(grid: TableGrid, inflection: Boolean, available: Int) {
         }
         val prefTotal = pref.sum() + gaps
         val minTotal = min.sum() + gaps
-        val limit = if (available in 1 until Constraints.Infinity) available else Int.MAX_VALUE
+        val limit = if (room in 1 until Constraints.Infinity) room else Int.MAX_VALUE
         // Scale only when even the narrowest columns overflow, and never below MIN_SCALE.
         val scale = if (minTotal <= limit) 1f else maxOf(limit.toFloat() / minTotal, MIN_SCALE)
         val target = if (limit == Int.MAX_VALUE) Int.MAX_VALUE else (limit / scale).toInt()
@@ -361,6 +377,7 @@ private fun CellBox(placed: PlacedCell, grid: TableGrid, inflection: Boolean) {
                 MaterialTheme.typography.bodyMedium
             },
             LocalContentColor provides content,
+            LocalInTableCell provides true,
         ) {
             BlockList(cell.blocks, spacing = 4)
         }
